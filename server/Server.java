@@ -1,7 +1,6 @@
 package server;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 
@@ -19,46 +18,32 @@ public class Server {
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             System.out.println("[SERVER] [LISTENING] Port: " + PORT);
 
-            Socket clientSocket = serverSocket.accept();
-            System.out.println("[SERVER] [CONNECTED] Client: " + clientSocket.getInetAddress());
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                System.out.println("[SERVER] [SHUTDOWN] Server is shutting down...");
+            }));
 
-            handleClient(clientSocket);
+            while (true) {
+                Socket clientSocket = serverSocket.accept();
 
-        } catch (Exception e) {
+                logConnection(clientSocket);
+                handleNewClient(clientSocket);
+            }
+
+        } catch (IOException e) {
             System.err.println("[SERVER] [ERROR] Failed to start server: " + e.getMessage());
         }
     }
 
-    private static void handleClient(Socket clientSocket) {
-    try (
-        BufferedReader reader = new BufferedReader(
-            new InputStreamReader(clientSocket.getInputStream())
-        )
-    ) {
-        String message;
+    private static void handleNewClient(Socket clientSocket) {
+        ClientHandler handler = new ClientHandler(clientSocket);
 
-        while (true) {
-            message = reader.readLine();
-
-            if (message == null) {
-                System.out.println("[SERVER] [DISCONNECTED] Client: "
-                        + clientSocket.getInetAddress());
-                break;
-            }
-
-            System.out.println("[SERVER] [MESSAGE] " + message);
-        }
-
-    } catch (Exception e) {
-        System.err.println("[SERVER] [ERROR] Client connection issue: " + e.getMessage());
-    } finally {
-        try {
-            if (clientSocket != null && !clientSocket.isClosed()) {
-                clientSocket.close();
-            }
-        } catch (Exception e) {
-            System.err.println("[SERVER] [ERROR] Failed to close client socket");
-        }
+        Thread thread = new Thread(handler);
+        thread.setName("Client-" + clientSocket.getPort());
+        thread.start();
     }
-}
+
+    private static void logConnection(Socket clientSocket) {
+        System.out.println("[SERVER] [CONNECTED] Client: "
+                + clientSocket.getInetAddress() + ":" + clientSocket.getPort());
+    }
 }
