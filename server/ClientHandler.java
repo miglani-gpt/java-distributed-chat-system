@@ -1,260 +1,245 @@
 package server;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import common.Message;
+import common.MessageFactory;
+import common.MessageValidator;
+
+import java.io.*;
 import java.net.Socket;
-import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ClientHandler implements Runnable {
 
-    private final Socket clientSocket;
-    private PrintWriter writer;
+    private final Socket socket;
+    private BufferedReader in;
+    private PrintWriter out;
     private String username;
 
-    public ClientHandler(Socket socket) {
-        this.clientSocket = socket;
+    private final ConcurrentHashMap<String, ClientHandler> clients;
+
+    private volatile boolean active = false;
+    private volatile boolean cleanedUp = false; // 🔥 prevent double cleanup
+
+    public ClientHandler(Socket socket, ConcurrentHashMap<String, ClientHandler> clients) {
+        this.socket = socket;
+        this.clients = clients;
     }
 
     @Override
     public void run() {
-        log("[THREAD STARTED] " + clientSocket.getInetAddress() + ":" + clientSocket.getPort());
-
         try {
-            clientSocket.setSoTimeout(300000);
+            System.out.println("[THREAD STARTED] Handling new client...");
+            setupStreams();
 
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(clientSocket.getInputStream())
-            );
+            if (!registerClient()) return;
 
-            writer = new PrintWriter(clientSocket.getOutputStream(), true);
+            active = true;
+            processMessages();
 
-            if (!handleUsernameSetup(reader)) return;
-
-            handleMessages(reader);
-
-        } catch (Exception e) {
-            logError("[ERROR] Client issue: " + e.getMessage());
+        } catch (IOException e) {
+            System.out.println("[ERROR] Client connection issue: " + e.getMessage());
         } finally {
             cleanup();
         }
     }
 
-    // ================= USERNAME SETUP =================
+    private void setupStreams() throws IOException {
+        in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+        out = new PrintWriter(socket.getOutputStream(), true);
+    }
 
-    private boolean handleUsernameSetup(BufferedReader reader) throws Exception {
-        sendMessage("[SYSTEM] Enter your username:");
+    // ==============================
+    // Registration
+    // ==============================
+    private boolean registerClient() throws IOException {
 
-        while (true) {
-            String inputName = reader.readLine();
-            if (inputName == null) return false;
+        String raw = in.readLine();
+        System.out.println("[INIT RAW] " + raw);
 
-            inputName = inputName.trim();
+        Message initMsg = Message.fromJson(raw);
 
-            if (!isValidUsername(inputName)) {
-                sendMessage("[ERROR] Username must be 3-15 characters (letters, numbers, _)");
+        if (initMsg == null || initMsg.getSender() == null) {
+            send(MessageFactory.error("Invalid initialization message."));
+            return false;
+        }
+
+        String requestedName = initMsg.getSender().trim();
+
+        if (requestedName.isEmpty() || clients.containsKey(requestedName)) {
+            send(MessageFactory.error("Invalid or duplicate username."));
+            return false;
+        }
+
+        username = requestedName;
+        clients.put(username, this);
+
+        System.out.println("[USER REGISTERED] " + username);
+        System.out.println("[STATE] Clients: " + clients.keySet());
+
+        send(MessageFactory.system("Welcome " + username + "!"));
+        broadcast(MessageFactory.system(username + " joined the chat."));
+
+        return true;
+    }
+
+    // ==============================
+    // Main Loop
+    // ==============================
+    private void processMessages() throws IOException {
+
+        String input;
+
+        while ((input = in.readLine()) != null) {
+
+            if (!active) continue;
+
+            System.out.println("[RECEIVED] " + username + ": " + input);
+
+            Message msg = Message.fromJson(input);
+
+            if (msg == null || !MessageValidator.isValid(msg)) {
+                send(MessageFactory.error("Invalid message format."));
                 continue;
             }
 
-            username = inputName;
+            switch (msg.getType()) {
 
-            if (Server.addClient(this)) {
-                sendMessage("[SYSTEM] Welcome " + username + "!");
-                sendOnlineUsers();
-                return true;
-            } else {
-                sendMessage("[ERROR] Username already taken. Try again:");
+                case CHAT:
+                    broadcast(MessageFactory.chat(username, msg.getContent()));
+                    break;
+
+                case PRIVATE:
+                    handlePrivate(msg);
+                    break;
+
+                case COMMAND:
+                    handleCommand(msg);
+                    break;
+
+                case PING: // ❤️ heartbeat
+                    send(MessageFactory.pong());
+                    break;
+
+                default:
+                    send(MessageFactory.error("Unsupported message type."));
             }
         }
+
+        // 🔥 graceful disconnect log
+        System.out.println("[DISCONNECTED] " + username);
     }
 
-    // ================= MESSAGE LOOP =================
+    // ==============================
+    // Handlers
+    // ==============================
+    private void handlePrivate(Message msg) {
 
-    private void handleMessages(BufferedReader reader) throws Exception {
-        String message;
+        String target = msg.getReceiver();
+        ClientHandler receiver = clients.get(target);
 
-        while ((message = reader.readLine()) != null) {
-            message = message.trim();
-
-            if (message.isEmpty()) {
-                sendMessage("[ERROR] Message cannot be empty");
-                continue;
-            }
-
-            if (processMessage(message)) break;
-        }
-    }
-
-    // ================= MESSAGE PROCESSOR =================
-
-    private boolean processMessage(String message) {
-
-        if (message.startsWith("/")) {
-            return handleCommand(message);
+        if (receiver == null) {
+            send(MessageFactory.error("User not found: " + target));
+            return;
         }
 
-        broadcastChat(message);
-        return false;
+        Message privateMsg = MessageFactory.privateMsg(
+                username,
+                target,
+                msg.getContent()
+        );
+
+        receiver.send(privateMsg);
+        send(privateMsg);
     }
 
-    // ================= CHAT =================
+    private void handleCommand(Message msg) {
 
-    private void broadcastChat(String message) {
-        String formatted = "[CHAT][" + username + "]: " + message;
-        log("[MESSAGE] " + formatted);
-        Server.broadcast(formatted);
-    }
+        String command = msg.getCommand();
 
-    // ================= COMMAND HANDLER =================
-
-    private boolean handleCommand(String message) {
-
-        String[] parts = message.split(" ", 2);
-        String command = parts[0].toLowerCase();
+        if (command == null) {
+            send(MessageFactory.error("Invalid command."));
+            return;
+        }
 
         switch (command) {
 
-            case "/exit":
-                return true;
+            case "LIST":
+                sendUserList();
+                break;
 
-            case "/name":
-                if (parts.length < 2) {
-                    sendMessage("[ERROR] Usage: /name <new_name>");
-                    return false;
-                }
-                return handleUsernameChange(parts[1]);
+            case "NAME":
+                changeUsername(msg.getContent());
+                break;
 
-            case "/msg":
-                return handlePrivateMessage(message);
-
-            case "/list":
-                sendOnlineUsers();
-                return false;
-
-            case "/help":
-                sendHelp();
-                return false;
+            case "EXIT":
+                cleanup();
+                break;
 
             default:
-                sendMessage("[ERROR] Unknown command. Type /help for available commands.");
-                return false;
+                send(MessageFactory.error("Unknown command."));
         }
     }
 
-    // ================= COMMAND HELPERS =================
+    private void sendUserList() {
+        send(MessageFactory.system(
+                "Online Users: " + String.join(", ", clients.keySet())
+        ));
+    }
 
-    private boolean handleUsernameChange(String newName) {
-        newName = newName.trim();
+    private void changeUsername(String newName) {
 
-        if (!isValidUsername(newName)) {
-            sendMessage("[ERROR] Invalid username format.");
-            return false;
+        if (newName == null || newName.trim().isEmpty() || clients.containsKey(newName)) {
+            send(MessageFactory.error("Invalid or taken username."));
+            return;
         }
 
         String oldName = username;
 
-        if (!Server.updateUsername(oldName, newName, this)) {
-            sendMessage("[ERROR] Username already taken.");
-            return false;
-        }
+        clients.remove(oldName);
+        username = newName.trim();
+        clients.put(username, this);
 
-        username = newName;
-
-        Server.broadcast("[SYSTEM] " + oldName + " is now known as " + username);
-        sendMessage("[SYSTEM] You are now known as " + username);
-
-        return false;
+        broadcast(MessageFactory.system(oldName + " is now known as " + username));
     }
 
-    private boolean handlePrivateMessage(String message) {
-        String[] parts = message.split(" ", 3);
-
-        if (parts.length < 3) {
-            sendMessage("[ERROR] Usage: /msg <username> <message>");
-            return false;
-        }
-
-        String targetUsername = parts[1];
-        String privateMessage = parts[2];
-
-        ClientHandler target = Server.findClientByUsername(targetUsername);
-
-        if (target == null) {
-            sendMessage("[ERROR] User not found.");
-            return false;
-        }
-
-        target.sendMessage("[PRIVATE][" + username + "]: " + privateMessage);
-        sendMessage("[PRIVATE → " + targetUsername + "] " + privateMessage);
-
-        return false;
-    }
-
-    private void sendOnlineUsers() {
-        Set<String> users = Server.getAllUsernames();
-
-        if (users.size() == 1) {
-            sendMessage("[SYSTEM] You are the only user online");
-        } else {
-            sendMessage("[SYSTEM] Online users: " + String.join(", ", users));
+    // ==============================
+    // Messaging
+    // ==============================
+    private void broadcast(Message msg) {
+        for (ClientHandler client : clients.values()) {
+            try {
+                client.send(msg);
+            } catch (Exception ignored) {}
         }
     }
 
-    private void sendHelp() {
-        sendMessage("[SYSTEM] === Available Commands ===");
-        sendMessage(" /name <new_name>    → Change your username");
-        sendMessage(" /msg <user> <msg>   → Send private message");
-        sendMessage(" /list               → Show online users");
-        sendMessage(" /help               → Show this help menu");
-        sendMessage(" /exit               → Disconnect");
-    }
-
-    // ================= VALIDATION =================
-
-    private boolean isValidUsername(String name) {
-        return name.matches("^[a-zA-Z0-9_]{3,15}$");
-    }
-
-    // ================= UTIL =================
-
-    public void sendMessage(String message) {
-        if (writer != null) {
-            writer.println(message);
-
-            if (writer.checkError()) {
-                throw new RuntimeException("Client disconnected");
-            }
+    private void send(Message msg) {
+        if (out != null) {
+            out.println(msg.toJson());
         }
     }
 
-    public String getUsername() {
-        return username;
-    }
-
-    // ================= CLEANUP =================
-
+    // ==============================
+    // Cleanup
+    // ==============================
     private void cleanup() {
-        try {
-            Server.removeClient(this);
 
-            if (!clientSocket.isClosed()) {
-                clientSocket.close();
+        if (cleanedUp) return;
+        cleanedUp = true;
+
+        try {
+            if (username != null && clients.containsKey(username)) {
+                clients.remove(username);
+                System.out.println("[USER LEFT] " + username);
+                broadcast(MessageFactory.system(username + " left the chat."));
             }
 
-            log("[CLEANUP] " + clientSocket.getInetAddress() + ":" + clientSocket.getPort());
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
+            }
 
-        } catch (Exception e) {
-            logError("[ERROR] Cleanup failed");
+        } catch (IOException e) {
+            System.out.println("[ERROR] Cleanup failed: " + e.getMessage());
         }
-    }
-
-    // ================= LOGGING =================
-
-    private void log(String message) {
-        System.out.println("[SERVER][" + Thread.currentThread().getName() + "] " + message);
-    }
-
-    private void logError(String message) {
-        System.err.println("[SERVER][" + Thread.currentThread().getName() + "] " + message);
     }
 }

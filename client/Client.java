@@ -1,149 +1,249 @@
 package client;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.io.IOException;
+import common.Message;
+import common.MessageFactory;
+import common.MessageType;
+
+import java.io.*;
 import java.net.Socket;
 
 public class Client {
 
-    private static final String DEFAULT_SERVER_ADDRESS = "localhost";
+    private static final String SERVER_ADDRESS = "localhost";
     private static final int PORT = 5000;
 
-    private static volatile boolean isRunning = true;
+    private static String username;
+    private static volatile boolean running = true;
+
+    // ❤️ HEARTBEAT STATE
+    private static volatile long lastPongTime = System.currentTimeMillis();
 
     public static void main(String[] args) {
-        String serverAddress = args.length > 0 ? args[0] : DEFAULT_SERVER_ADDRESS;
-        startClient(serverAddress);
-    }
 
-    private static void startClient(String serverAddress) {
-        log("[CONNECTING] " + serverAddress + ":" + PORT);
+        Thread listener = null;
+        Thread heartbeat = null;
+        Thread monitor = null;
 
-        try (
-            Socket socket = new Socket(serverAddress, PORT);
-            BufferedReader consoleReader = new BufferedReader(
-                    new InputStreamReader(System.in)
-            );
-            BufferedReader serverReader = new BufferedReader(
+        try (Socket socket = new Socket(SERVER_ADDRESS, PORT)) {
+
+            System.out.println("[CONNECTED] Connected to server");
+
+            BufferedReader in = new BufferedReader(
                     new InputStreamReader(socket.getInputStream())
             );
-            PrintWriter writer = new PrintWriter(
+
+            PrintWriter out = new PrintWriter(
                     socket.getOutputStream(), true
             );
-        ) {
-            log("[CONNECTED]");
 
-            // 🔥 Listener thread
-            Thread listener = new Thread(() -> listenToServer(serverReader));
-            listener.setName("Server-Listener");
-            listener.start();
+            BufferedReader console = new BufferedReader(
+                    new InputStreamReader(System.in)
+            );
 
-            // 🔥 Sender loop
-            sendMessages(consoleReader, writer);
+            // ==============================
+            // Username Setup
+            // ==============================
+            while (true) {
+                System.out.print("Enter username: ");
+                username = console.readLine();
 
-            listener.join();
-
-        } catch (IOException e) {
-            logError("[ERROR] Connection failed: " + e.getMessage());
-        } catch (InterruptedException ignored) {
-        } finally {
-            isRunning = false;
-            log("[SHUTDOWN]");
-        }
-    }
-
-    // ================= LISTENER =================
-
-    private static void listenToServer(BufferedReader serverReader) {
-        try {
-            String serverMessage;
-
-            while (isRunning && (serverMessage = serverReader.readLine()) != null) {
-                printMessage(serverMessage);
-                printPrompt(); // 🔥 keep input line clean
-            }
-
-        } catch (IOException e) {
-            if (isRunning) {
-                logError("[ERROR] Connection lost");
-            }
-        } finally {
-            isRunning = false;
-            log("[DISCONNECTED]");
-        }
-    }
-
-    // ================= SENDER =================
-
-    private static void sendMessages(BufferedReader consoleReader, PrintWriter writer) {
-        try {
-            String userInput;
-
-            printPrompt();
-
-            while (isRunning && (userInput = consoleReader.readLine()) != null) {
-
-                writer.println(userInput);
-
-                if (writer.checkError()) {
-                    throw new IOException("Send failed");
-                }
-
-                if ("/exit".equalsIgnoreCase(userInput)) {
-                    log("[DISCONNECTING]");
-                    isRunning = false;
+                if (username != null && !username.trim().isEmpty()) {
+                    username = username.trim();
                     break;
                 }
 
-                printPrompt(); // 🔥 show prompt again after sending
+                System.out.println("[ERROR] Username cannot be empty.");
+            }
+
+            // INIT
+            Message initMsg = MessageFactory.command(username, "INIT", null, "");
+            out.println(initMsg.toJson());
+
+            // ==============================
+            // 🔥 LISTENER THREAD
+            // ==============================
+            listener = new Thread(() -> {
+                try {
+                    String response;
+
+                    while (running && (response = in.readLine()) != null) {
+
+                        Message msg = Message.fromJson(response);
+                        if (msg == null) continue;
+
+                        // ❤️ HEARTBEAT RESPONSE
+                        if (msg.getType() == MessageType.PONG) {
+                            lastPongTime = System.currentTimeMillis();
+                            continue;
+                        }
+
+                        displayMessage(msg);
+                    }
+
+                } catch (IOException e) {
+                    System.out.println("\n[DISCONNECTED] Server connection lost.");
+                } finally {
+                    running = false;
+                }
+            });
+
+            listener.start();
+
+            // ==============================
+            // ❤️ HEARTBEAT THREAD
+            // ==============================
+            heartbeat = new Thread(() -> {
+                try {
+                    while (running) {
+                        Thread.sleep(3000);
+
+                        if (!running) break;
+
+                        Message ping = MessageFactory.ping(username);
+                        out.println(ping.toJson());
+                    }
+                } catch (InterruptedException ignored) {}
+            });
+
+            heartbeat.start();
+
+            // ==============================
+            // 🔥 MONITOR THREAD
+            // ==============================
+            monitor = new Thread(() -> {
+                while (running) {
+                    long now = System.currentTimeMillis();
+
+                    if (now - lastPongTime > 15000) {
+                        System.out.println("\n[DISCONNECTED] Server not responding (heartbeat failed).");
+                        running = false;
+                        break;
+                    }
+
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException ignored) {}
+                }
+            });
+
+            monitor.start();
+
+            // ==============================
+            // MAIN LOOP (FIXED)
+            // ==============================
+            String userInput;
+
+            while (running) {
+
+                if (!console.ready()) {
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException ignored) {}
+                    continue;
+                }
+
+                userInput = console.readLine();
+                if (userInput == null) break;
+
+                userInput = userInput.trim();
+                if (userInput.isEmpty()) continue;
+
+                Message msg = buildMessage(userInput);
+
+                System.out.println("[SENDING] " + msg.toJson());
+                out.println(msg.toJson());
+
+                if ("EXIT".equals(msg.getCommand())) {
+                    running = false;
+                    break;
+                }
             }
 
         } catch (IOException e) {
-            if (isRunning) {
-                logError("[ERROR] Sending failed: " + e.getMessage());
+            System.out.println("[ERROR] Unable to connect to server.");
+        }
+
+        // ==============================
+        // 🔥 CLEAN SHUTDOWN
+        // ==============================
+        running = false;
+
+        if (listener != null) listener.interrupt();
+        if (heartbeat != null) heartbeat.interrupt();
+        if (monitor != null) monitor.interrupt();
+
+        System.out.println("[CLIENT CLOSED]");
+    }
+
+    // ==============================
+    // Message Builder
+    // ==============================
+    private static Message buildMessage(String input) {
+
+        if (input.startsWith("/msg ")) {
+            String[] parts = input.split(" ", 3);
+
+            if (parts.length < 3) {
+                System.out.println("[ERROR] Usage: /msg <user> <message>");
+                return MessageFactory.error("Invalid private message format");
             }
-        }
-    }
 
-    // ================= OUTPUT FORMAT =================
-
-    private static void printMessage(String message) {
-
-        if (message.startsWith("[SYSTEM]")) {
-            System.out.println("\n" + message);
-            return;
+            return MessageFactory.privateMsg(
+                username,
+                parts[1],
+                parts[2]
+            );
         }
 
-        if (message.startsWith("[PRIVATE]")) {
-            System.out.println("\n" + message);
-            return;
+        if (input.equals("/list")) {
+            return MessageFactory.command(username, "LIST", null, "");
         }
 
-        if (message.startsWith("[CHAT]")) {
-            System.out.println(message);
-            return;
+        if (input.startsWith("/name ")) {
+            String newName = input.substring(6).trim();
+
+            if (newName.isEmpty()) {
+                System.out.println("[ERROR] Username cannot be empty.");
+                return MessageFactory.error("Invalid username");
+            }
+
+            return MessageFactory.command(username, "NAME", null, newName);
         }
 
-        // fallback
-        System.out.println(message);
+        if (input.equals("/exit")) {
+            return MessageFactory.command(username, "EXIT", null, "");
+        }
+
+        return MessageFactory.chat(username, input);
     }
 
-    // ================= PROMPT =================
+    // ==============================
+    // Display
+    // ==============================
+    private static void displayMessage(Message msg) {
 
-    private static void printPrompt() {
-        System.out.print("> ");
-        System.out.flush();
-    }
+        if (msg == null || msg.getType() == null) return;
 
-    // ================= LOGGING =================
+        switch (msg.getType()) {
 
-    private static void log(String message) {
-        System.out.println("[CLIENT] " + message);
-    }
+            case CHAT:
+                System.out.println("[CHAT][" + msg.getSender() + "]: " + msg.getContent());
+                break;
 
-    private static void logError(String message) {
-        System.err.println("[CLIENT] " + message);
+            case PRIVATE:
+                System.out.println("[PRIVATE][" + msg.getSender() + "]: " + msg.getContent());
+                break;
+
+            case SYSTEM:
+                System.out.println("[SYSTEM]: " + msg.getContent());
+                break;
+
+            case ERROR:
+                System.out.println("[ERROR]: " + msg.getContent());
+                break;
+
+            default:
+                System.out.println("[UNKNOWN]: " + msg.getContent());
+        }
     }
 }
