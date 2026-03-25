@@ -3,6 +3,9 @@ package server;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Server {
@@ -14,6 +17,7 @@ public class Server {
     private static final ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>();
 
     private static volatile boolean isRunning = true;
+    private static ServerSocket serverSocket; // 🔥 needed for graceful shutdown
 
     public static void main(String[] args) {
         startServer();
@@ -22,35 +26,57 @@ public class Server {
     private static void startServer() {
         log("[START] Server is starting...");
 
-        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+        try {
+            serverSocket = new ServerSocket(PORT);
             log("[LISTENING] Port: " + PORT);
 
+            // 🔥 Shutdown Hook
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                log("[SHUTDOWN] Server is shutting down...");
-                isRunning = false;
-
-                for (ClientHandler client : clients.values()) {
-                    try {
-                        client.sendMessage("[SERVER] Server is shutting down...");
-                    } catch (Exception ignored) {}
-                }
+                shutdownServer();
             }));
 
             while (isRunning) {
-                Socket clientSocket = serverSocket.accept();
+                try {
+                    Socket clientSocket = serverSocket.accept();
 
-                if (clients.size() >= MAX_CLIENTS) {
-                    log("[REJECTED] Max clients reached: " + clientSocket.getInetAddress());
-                    clientSocket.close();
-                    continue;
+                    if (clients.size() >= MAX_CLIENTS) {
+                        log("[REJECTED] Max clients reached: " + clientSocket.getInetAddress());
+                        clientSocket.close();
+                        continue;
+                    }
+
+                    logConnection(clientSocket);
+                    handleNewClient(clientSocket);
+
+                } catch (IOException e) {
+                    if (isRunning) {
+                        logError("[ERROR] Accept failed: " + e.getMessage());
+                    }
                 }
-
-                logConnection(clientSocket);
-                handleNewClient(clientSocket);
             }
 
         } catch (IOException e) {
-            logError("[ERROR] Failed to start server: " + e.getMessage());
+            logError("[FATAL] Failed to start server: " + e.getMessage());
+        }
+    }
+
+    // 🔥 Clean shutdown logic
+    private static void shutdownServer() {
+        log("[SHUTDOWN] Server is shutting down...");
+        isRunning = false;
+
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close(); // 🔥 breaks accept()
+            }
+        } catch (IOException e) {
+            logError("[SHUTDOWN ERROR] " + e.getMessage());
+        }
+
+        for (ClientHandler client : clients.values()) {
+            try {
+                client.sendMessage("[SERVER] Server is shutting down...");
+            } catch (Exception ignored) {}
         }
     }
 
@@ -69,20 +95,35 @@ public class Server {
 
     // ================= CLIENT MANAGEMENT =================
 
-    public static void addClient(ClientHandler client) {
-        clients.put(client.getUsername(), client);
-        log("[CLIENT ADDED] " + client.getUsername() + " | Total: " + clients.size());
+    public static boolean addClient(ClientHandler client) {
+        boolean added = clients.putIfAbsent(client.getUsername(), client) == null;
+
+        if (added) {
+            log("[CLIENT ADDED] " + client.getUsername() + " | Total: " + clients.size());
+            broadcast("[SERVER] " + client.getUsername() + " joined the chat", null);
+        }
+
+        return added;
     }
 
     public static void removeClient(ClientHandler client) {
-        clients.remove(client.getUsername());
-        log("[CLIENT REMOVED] " + client.getUsername() + " | Total: " + clients.size());
+        if (client.getUsername() != null && clients.remove(client.getUsername()) != null) {
+            log("[CLIENT REMOVED] " + client.getUsername() + " | Total: " + clients.size());
+            broadcast("[SERVER] " + client.getUsername() + " left the chat", null);
+        }
     }
 
-    // 🔥 IMPORTANT: username change support
-    public static void updateUsername(String oldName, String newName, ClientHandler client) {
+    // 🔥 FIXED: atomic username update
+    public static synchronized boolean updateUsername(String oldName, String newName, ClientHandler client) {
+        if (clients.containsKey(newName)) {
+            return false;
+        }
+
         clients.remove(oldName);
         clients.put(newName, client);
+
+        log("[USERNAME UPDATED] " + oldName + " → " + newName);
+        return true;
     }
 
     // ================= BROADCAST =================
@@ -93,7 +134,8 @@ public class Server {
                 try {
                     client.sendMessage(message);
                 } catch (Exception e) {
-                    logError("[BROADCAST ERROR] Failed to send message");
+                    logError("[BROADCAST ERROR] Removing dead client: " + client.getUsername());
+                    removeClient(client); // 🔥 cleanup
                 }
             }
         }
@@ -109,13 +151,22 @@ public class Server {
         return clients.get(username);
     }
 
+    public static Set<String> getAllUsernames() {
+        return clients.keySet();
+    }
+
     // ================= LOGGING =================
 
+    private static final DateTimeFormatter formatter =
+            DateTimeFormatter.ofPattern("HH:mm:ss");
+
     private static void log(String message) {
-        System.out.println("[SERVER] " + message);
+        System.out.println("[" + LocalDateTime.now().format(formatter) + "] [SERVER] "
+                + Thread.currentThread().getName() + " → " + message);
     }
 
     private static void logError(String message) {
-        System.err.println("[SERVER] " + message);
+        System.err.println("[" + LocalDateTime.now().format(formatter) + "] [SERVER] "
+                + Thread.currentThread().getName() + " → " + message);
     }
 }

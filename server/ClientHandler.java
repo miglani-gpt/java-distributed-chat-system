@@ -20,17 +20,23 @@ public class ClientHandler implements Runnable {
         log("[THREAD STARTED] Handling client: "
                 + clientSocket.getInetAddress() + ":" + clientSocket.getPort());
 
-        try (
+        try {
+            clientSocket.setSoTimeout(300000); // 🔥 Prevent infinite blocking (5 min)
+
             BufferedReader reader = new BufferedReader(
-                new InputStreamReader(clientSocket.getInputStream())
-            )
-        ) {
+                    new InputStreamReader(clientSocket.getInputStream())
+            );
+
             writer = new PrintWriter(clientSocket.getOutputStream(), true);
 
+            // 🔹 Default username
             username = "User-" + clientSocket.getPort();
 
-            Server.addClient(this);
-            Server.broadcast("[JOINED] " + username, this);
+            // 🔥 Safe add
+            if (!Server.addClient(this)) {
+                sendMessage("[ERROR] Username already taken.");
+                return;
+            }
 
             String message;
 
@@ -40,36 +46,17 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
-                String formattedMessage = username + ": " + message;
+                String formattedMessage = "[" + username + "] " + message;
 
                 log("[MESSAGE] " + formattedMessage);
                 Server.broadcast(formattedMessage, this);
             }
 
-            log("[DISCONNECTED] Client: "
-                    + clientSocket.getInetAddress() + ":" + clientSocket.getPort());
-
         } catch (Exception e) {
-            logError("[ERROR] Client connection issue ("
+            logError("[ERROR] Client issue (" 
                     + clientSocket.getInetAddress() + "): " + e.getMessage());
         } finally {
-            try {
-                if (username != null) {
-                    Server.broadcast("[LEFT] " + username, this);
-                }
-
-                Server.removeClient(this);
-
-                if (!clientSocket.isClosed()) {
-                    clientSocket.close();
-                }
-
-                log("[CLEANUP] Connection closed for: "
-                        + clientSocket.getInetAddress() + ":" + clientSocket.getPort());
-
-            } catch (Exception e) {
-                logError("[ERROR] Failed to close client socket");
-            }
+            cleanup();
         }
     }
 
@@ -82,32 +69,29 @@ public class ClientHandler implements Runnable {
             return true;
         }
 
-        // 🔵 NAME CHANGE
+        // 🔵 USERNAME CHANGE
         if (message.startsWith("/name ")) {
             String newName = message.substring(6).trim();
 
             if (!isValidUsername(newName)) {
-                sendMessage("[ERROR] Invalid username. Use 3-15 alphanumeric characters or underscores.");
+                sendMessage("[ERROR] Username must be 3-15 characters (letters, numbers, _)");
                 return false;
             }
 
-            synchronized (Server.class) {
-                if (Server.isUsernameTaken(newName)) {
-                    sendMessage("[ERROR] Username already taken.");
-                    return false;
-                }
+            String oldName = username;
 
-                String oldName = username;
-                username = newName;
+            boolean success = Server.updateUsername(oldName, newName, this);
 
-                // 🔥 Update map safely
-                Server.updateUsername(oldName, newName, this);
-
-                Server.broadcast("[SYSTEM] " + oldName + " is now known as " + username, this);
+            if (!success) {
+                sendMessage("[ERROR] Username already taken.");
+                return false;
             }
 
-            // 🔥 Self feedback
+            username = newName;
+
+            Server.broadcast("[SYSTEM] " + oldName + " is now known as " + username, this);
             sendMessage("[SYSTEM] You are now known as " + username);
+
             return false;
         }
 
@@ -130,11 +114,15 @@ public class ClientHandler implements Runnable {
                 return false;
             }
 
-            target.sendMessage("[PRIVATE] " + username + ": " + privateMessage);
+            target.sendMessage("[PRIVATE] [" + username + "]: " + privateMessage);
+            sendMessage("[PRIVATE → " + targetUsername + "] " + privateMessage);
 
-            // 🔥 Sender confirmation
-            sendMessage("[PRIVATE to " + targetUsername + "] " + privateMessage);
+            return false;
+        }
 
+        // 🟢 LIST USERS
+        if (message.equalsIgnoreCase("/list")) {
+            sendMessage("[USERS] " + String.join(", ", Server.getAllUsernames()));
             return false;
         }
 
@@ -154,14 +142,13 @@ public class ClientHandler implements Runnable {
             try {
                 writer.println(message);
 
-                // 🔥 Detect broken connection
                 if (writer.checkError()) {
                     throw new RuntimeException("Write failed");
                 }
 
             } catch (Exception e) {
-                logError("[SEND FAILED] Removing client: " + username);
-                Server.removeClient(this);
+                logError("[SEND FAILED] Client likely disconnected: " + username);
+                throw new RuntimeException("Client disconnected");
             }
         }
     }
@@ -170,11 +157,30 @@ public class ClientHandler implements Runnable {
         return username;
     }
 
+    // 🔥 Clean centralized cleanup
+    private void cleanup() {
+        try {
+            Server.removeClient(this);
+
+            if (!clientSocket.isClosed()) {
+                clientSocket.close();
+            }
+
+            log("[CLEANUP] Connection closed for: "
+                    + clientSocket.getInetAddress() + ":" + clientSocket.getPort());
+
+        } catch (Exception e) {
+            logError("[ERROR] Cleanup failed for client");
+        }
+    }
+
+    // ================= LOGGING =================
+
     private void log(String message) {
-        System.out.println("[SERVER] " + message);
+        System.out.println("[SERVER][" + Thread.currentThread().getName() + "] " + message);
     }
 
     private void logError(String message) {
-        System.err.println("[SERVER] " + message);
+        System.err.println("[SERVER][" + Thread.currentThread().getName() + "] " + message);
     }
 }
