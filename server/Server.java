@@ -7,6 +7,8 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Server {
 
@@ -17,7 +19,7 @@ public class Server {
     private static final ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>();
 
     private static volatile boolean isRunning = true;
-    private static ServerSocket serverSocket; // 🔥 needed for graceful shutdown
+    private static ServerSocket serverSocket;
 
     public static void main(String[] args) {
         startServer();
@@ -30,10 +32,7 @@ public class Server {
             serverSocket = new ServerSocket(PORT);
             log("[LISTENING] Port: " + PORT);
 
-            // 🔥 Shutdown Hook
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                shutdownServer();
-            }));
+            Runtime.getRuntime().addShutdownHook(new Thread(Server::shutdownServer));
 
             while (isRunning) {
                 try {
@@ -60,25 +59,24 @@ public class Server {
         }
     }
 
-    // 🔥 Clean shutdown logic
+    // ================= SHUTDOWN =================
+
     private static void shutdownServer() {
         log("[SHUTDOWN] Server is shutting down...");
         isRunning = false;
 
         try {
             if (serverSocket != null && !serverSocket.isClosed()) {
-                serverSocket.close(); // 🔥 breaks accept()
+                serverSocket.close();
             }
         } catch (IOException e) {
             logError("[SHUTDOWN ERROR] " + e.getMessage());
         }
 
-        for (ClientHandler client : clients.values()) {
-            try {
-                client.sendMessage("[SERVER] Server is shutting down...");
-            } catch (Exception ignored) {}
-        }
+        broadcast("[SYSTEM] Server is shutting down...");
     }
+
+    // ================= CONNECTION =================
 
     private static void handleNewClient(Socket clientSocket) {
         ClientHandler handler = new ClientHandler(clientSocket);
@@ -89,8 +87,7 @@ public class Server {
     }
 
     private static void logConnection(Socket clientSocket) {
-        log("[CONNECTED] Client: "
-                + clientSocket.getInetAddress() + ":" + clientSocket.getPort());
+        log("[CONNECTED] " + clientSocket.getInetAddress() + ":" + clientSocket.getPort());
     }
 
     // ================= CLIENT MANAGEMENT =================
@@ -100,20 +97,22 @@ public class Server {
 
         if (added) {
             log("[CLIENT ADDED] " + client.getUsername() + " | Total: " + clients.size());
-            broadcast("[SERVER] " + client.getUsername() + " joined the chat", null);
+            broadcast("[SYSTEM] " + client.getUsername() + " joined the chat");
         }
 
         return added;
     }
 
     public static void removeClient(ClientHandler client) {
-        if (client.getUsername() != null && clients.remove(client.getUsername()) != null) {
+        if (client.getUsername() != null &&
+                clients.remove(client.getUsername()) != null) {
+
             log("[CLIENT REMOVED] " + client.getUsername() + " | Total: " + clients.size());
-            broadcast("[SERVER] " + client.getUsername() + " left the chat", null);
+            broadcast("[SYSTEM] " + client.getUsername() + " left the chat");
         }
     }
 
-    // 🔥 FIXED: atomic username update
+    // 🔥 Atomic username update
     public static synchronized boolean updateUsername(String oldName, String newName, ClientHandler client) {
         if (clients.containsKey(newName)) {
             return false;
@@ -128,16 +127,26 @@ public class Server {
 
     // ================= BROADCAST =================
 
-    public static void broadcast(String message, ClientHandler sender) {
+    /**
+     * 🔥 Broadcast to ALL clients (including sender)
+     * Explicit design: sender receives their own message (echo)
+     */
+    public static void broadcast(String message) {
+
+        List<ClientHandler> toRemove = new ArrayList<>();
+
         for (ClientHandler client : clients.values()) {
-            if (client != sender) {
-                try {
-                    client.sendMessage(message);
-                } catch (Exception e) {
-                    logError("[BROADCAST ERROR] Removing dead client: " + client.getUsername());
-                    removeClient(client); // 🔥 cleanup
-                }
+            try {
+                client.sendMessage(message);
+            } catch (Exception e) {
+                logError("[BROADCAST ERROR] Marking dead client: " + client.getUsername());
+                toRemove.add(client);
             }
+        }
+
+        // 🔥 Remove after iteration (safe)
+        for (ClientHandler deadClient : toRemove) {
+            removeClient(deadClient);
         }
     }
 

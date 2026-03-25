@@ -19,7 +19,7 @@ public class Client {
     }
 
     private static void startClient(String serverAddress) {
-        log("[CONNECTING] Attempting to connect to " + serverAddress + ":" + PORT);
+        log("[CONNECTING] " + serverAddress + ":" + PORT);
 
         try (
             Socket socket = new Socket(serverAddress, PORT);
@@ -33,27 +33,24 @@ public class Client {
                     socket.getOutputStream(), true
             );
         ) {
-            log("[CONNECTED] Successfully connected to server");
+            log("[CONNECTED]");
 
-            // 🔥 Listener thread (receives messages)
+            // 🔥 Listener thread
             Thread listener = new Thread(() -> listenToServer(serverReader));
             listener.setName("Server-Listener");
             listener.start();
 
-            // 🔥 Sender loop (user input)
+            // 🔥 Sender loop
             sendMessages(consoleReader, writer);
 
-            // 🔥 Wait for listener to finish (clean shutdown)
-            try {
-                listener.join();
-            } catch (InterruptedException ignored) {}
+            listener.join();
 
         } catch (IOException e) {
-            logError("[ERROR] Unable to connect to server at "
-                    + serverAddress + ":" + PORT + " (" + e.getMessage() + ")");
+            logError("[ERROR] Connection failed: " + e.getMessage());
+        } catch (InterruptedException ignored) {
         } finally {
             isRunning = false;
-            log("[SHUTDOWN] Client stopped");
+            log("[SHUTDOWN]");
         }
     }
 
@@ -64,7 +61,8 @@ public class Client {
             String serverMessage;
 
             while (isRunning && (serverMessage = serverReader.readLine()) != null) {
-                System.out.println(serverMessage);
+                printMessage(serverMessage);
+                printPrompt(); // 🔥 keep input line clean
             }
 
         } catch (IOException e) {
@@ -73,7 +71,7 @@ public class Client {
             }
         } finally {
             isRunning = false;
-            log("[DISCONNECTED] Server connection closed");
+            log("[DISCONNECTED]");
         }
     }
 
@@ -83,37 +81,69 @@ public class Client {
         try {
             String userInput;
 
+            printPrompt();
+
             while (isRunning && (userInput = consoleReader.readLine()) != null) {
 
-                // 🔥 Send to server
                 writer.println(userInput);
 
                 if (writer.checkError()) {
-                    throw new IOException("Failed to send message");
+                    throw new IOException("Send failed");
                 }
 
-                // 🔥 Exit handling
                 if ("/exit".equalsIgnoreCase(userInput)) {
-                    log("[DISCONNECTING] Closing connection...");
+                    log("[DISCONNECTING]");
                     isRunning = false;
                     break;
                 }
+
+                printPrompt(); // 🔥 show prompt again after sending
             }
 
         } catch (IOException e) {
             if (isRunning) {
-                logError("[ERROR] Message sending failed: " + e.getMessage());
+                logError("[ERROR] Sending failed: " + e.getMessage());
             }
         }
+    }
+
+    // ================= OUTPUT FORMAT =================
+
+    private static void printMessage(String message) {
+
+        if (message.startsWith("[SYSTEM]")) {
+            System.out.println("\n" + message);
+            return;
+        }
+
+        if (message.startsWith("[PRIVATE]")) {
+            System.out.println("\n" + message);
+            return;
+        }
+
+        if (message.startsWith("[CHAT]")) {
+            System.out.println(message);
+            return;
+        }
+
+        // fallback
+        System.out.println(message);
+    }
+
+    // ================= PROMPT =================
+
+    private static void printPrompt() {
+        System.out.print("> ");
+        System.out.flush();
     }
 
     // ================= LOGGING =================
 
     private static void log(String message) {
-        System.out.println("[CLIENT][" + Thread.currentThread().getName() + "] " + message);
+        System.out.println("[CLIENT] " + message);
     }
 
     private static void logError(String message) {
-        System.err.println("[CLIENT][" + Thread.currentThread().getName() + "] " + message);
+        System.err.println("[CLIENT] " + message);
     }
 }
