@@ -1,6 +1,18 @@
 package common;
 
+import java.util.Set;
+
 public class MessageValidator {
+
+    // ✅ Centralized command registry (EXTENSIBLE)
+    private static final Set<String> VALID_COMMANDS = Set.of(
+            "LIST",
+            "EXIT",
+            "NAME",
+            "JOIN",     // ✅ NEW
+            "LEAVE",    // ✅ NEW
+            "ROOMS"     // ✅ NEW
+    );
 
     public static boolean isValid(Message msg) {
 
@@ -22,11 +34,11 @@ public class MessageValidator {
 
             case SYSTEM:
             case ERROR:
-                return true; // 🔥 relaxed (important)
+                return true; // relaxed (intentional)
 
             case PING:
             case PONG:
-                return true; // ❤️ heartbeat allowed
+                return true; // heartbeat always allowed
 
             default:
                 return false;
@@ -34,26 +46,35 @@ public class MessageValidator {
     }
 
     // ==============================
-    // Command-specific validation
+    // Command Validation (UPGRADED)
     // ==============================
     private static boolean validateCommand(Message msg) {
 
+        String sender = msg.getSender();
         String command = msg.getCommand();
 
-        if (!notEmpty(msg.getSender()) || !notEmpty(command)) return false;
+        if (!notEmpty(sender) || !notEmpty(command)) return false;
+
+        command = command.trim().toUpperCase();
+
+        if (!VALID_COMMANDS.contains(command)) {
+            return false;
+        }
 
         switch (command) {
 
             case "LIST":
             case "EXIT":
+            case "LEAVE":
+            case "ROOMS":
+                // ✅ No content required
                 return true;
 
             case "NAME":
                 return notEmpty(msg.getContent());
 
-            case "PRIVATE":
-                return notEmpty(msg.getReceiver()) &&
-                       notEmpty(msg.getContent());
+            case "JOIN":
+                return notEmpty(msg.getContent()); // room name required
 
             default:
                 return false;

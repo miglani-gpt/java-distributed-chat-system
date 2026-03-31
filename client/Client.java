@@ -272,41 +272,84 @@ public class Client {
     // ==============================
     // MESSAGE BUILDING (UNCHANGED)
     // ==============================
+    
     private static Message buildMessage(String input) {
 
-        if (input.startsWith("/msg ")) {
-            String[] parts = input.split(" ", 3);
+    // ==============================
+    // PRIVATE MESSAGE
+    // ==============================
+    if (input.startsWith("/msg ")) {
+        String[] parts = input.split(" ", 3);
 
-            if (parts.length < 3) {
-                System.out.println("[ERROR] Usage: /msg <user> <message>");
-                return MessageFactory.error("Invalid private message format");
-            }
-
-            return MessageFactory.privateMsg(username, parts[1], parts[2]);
+        if (parts.length < 3) {
+            System.out.println("[ERROR] Usage: /msg <user> <message>");
+            return MessageFactory.error("Invalid private message format");
         }
 
-        if (input.equals("/list")) {
-            return MessageFactory.command(username, "LIST", null, "");
-        }
-
-        if (input.startsWith("/name ")) {
-            String newName = input.substring(6).trim();
-
-            if (newName.isEmpty()) {
-                System.out.println("[ERROR] Username cannot be empty.");
-                return MessageFactory.error("Invalid username");
-            }
-
-            return MessageFactory.command(username, "NAME", null, newName);
-        }
-
-        if (input.equals("/exit")) {
-            return MessageFactory.command(username, "EXIT", null, "");
-        }
-
-        return MessageFactory.chat(username, input);
+        return MessageFactory.privateMsg(username, parts[1], parts[2]);
     }
 
+    // ==============================
+    // LIST USERS
+    // ==============================
+    if (input.equals("/list")) {
+        return MessageFactory.command(username, "LIST", null, "");
+    }
+
+    // ==============================
+    // CHANGE NAME
+    // ==============================
+    if (input.startsWith("/name ")) {
+        String newName = input.substring(6).trim();
+
+        if (newName.isEmpty()) {
+            System.out.println("[ERROR] Username cannot be empty.");
+            return MessageFactory.error("Invalid username");
+        }
+
+        return MessageFactory.command(username, "NAME", null, newName);
+    }
+
+    // ==============================
+    // EXIT
+    // ==============================
+    if (input.equals("/exit")) {
+        return MessageFactory.command(username, "EXIT", null, "");
+    }
+
+    // ==============================
+    // 🔥 NEW: JOIN ROOM
+    // ==============================
+    if (input.startsWith("/join ")) {
+        String room = input.substring(6).trim();
+
+        if (room.isEmpty()) {
+            System.out.println("[ERROR] Usage: /join <room>");
+            return MessageFactory.error("Invalid room name");
+        }
+
+        return MessageFactory.command(username, "JOIN", null, room);
+    }
+
+    // ==============================
+    // 🔥 NEW: LEAVE ROOM
+    // ==============================
+    if (input.equals("/leave")) {
+        return MessageFactory.command(username, "LEAVE", null, "");
+    }
+
+    // ==============================
+    // 🔥 NEW: LIST ROOMS
+    // ==============================
+    if (input.equals("/rooms")) {
+        return MessageFactory.command(username, "ROOMS", null, "");
+    }
+
+    // ==============================
+    // DEFAULT: CHAT
+    // ==============================
+    return MessageFactory.chat(username, input);
+}
     // ==============================
     // DISPLAY (UNCHANGED)
     // ==============================

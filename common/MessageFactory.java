@@ -47,7 +47,7 @@ public class MessageFactory {
     public static Message ping(String sender) {
         return new Message(
                 MessageType.PING,
-                clean(sender),   // keep for extensibility (optional)
+                clean(sender),
                 null,
                 null,
                 null
@@ -78,6 +78,19 @@ public class MessageFactory {
     }
 
     // ==============================
+    // 🔥 ROOM EVENT (NEW)
+    // ==============================
+    public static Message roomEvent(String room, String content) {
+        return new Message(
+                MessageType.SYSTEM,
+                "SERVER",
+                null,
+                formatRoomMessage(room, content),
+                null
+        );
+    }
+
+    // ==============================
     // ERROR MESSAGE
     // ==============================
     public static Message error(String content) {
@@ -94,7 +107,7 @@ public class MessageFactory {
     // UTILITIES
     // ==============================
     private static String clean(String value) {
-        if (value == null) return null; // 🔥 changed (important)
+        if (value == null) return null;
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
     }
@@ -103,5 +116,12 @@ public class MessageFactory {
         if (command == null) return null;
         String trimmed = command.trim();
         return trimmed.isEmpty() ? null : trimmed.toUpperCase();
+    }
+
+    // ==============================
+    // 🔥 ROOM FORMATTER (NEW)
+    // ==============================
+    private static String formatRoomMessage(String room, String content) {
+        return "[ROOM " + room + "]: " + content;
     }
 }

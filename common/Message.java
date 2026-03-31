@@ -48,7 +48,7 @@ public class Message {
     public void setCommand(String command) { this.command = command; }
 
     // ======================
-    // Serialize → JSON (FIXED)
+    // Serialize → JSON (IMPROVED)
     // ======================
     public String toJson() {
         return String.format(
@@ -62,7 +62,7 @@ public class Message {
     }
 
     // ======================
-    // Deserialize ← JSON
+    // Deserialize ← JSON (IMPROVED)
     // ======================
     public static Message fromJson(String json) {
         if (json == null || json.isEmpty()) return null;
@@ -70,11 +70,15 @@ public class Message {
         Message msg = new Message();
 
         try {
-            msg.setType(MessageType.valueOf(extract(json, "type")));
+            String typeStr = extract(json, "type");
+            if (typeStr == null || typeStr.isEmpty()) return null;
+
+            msg.setType(MessageType.valueOf(typeStr));
             msg.setSender(extract(json, "sender"));
             msg.setReceiver(extract(json, "receiver"));
             msg.setContent(extract(json, "content"));
             msg.setCommand(extract(json, "command"));
+
         } catch (Exception e) {
             return null;
         }
@@ -83,30 +87,60 @@ public class Message {
     }
 
     // ======================
-    // Safe field extractor
+    // Safe extractor (ESCAPE-AWARE)
     // ======================
     private static String extract(String json, String key) {
+
         String pattern = "\"" + key + "\":\"";
         int start = json.indexOf(pattern);
 
-        if (start == -1) return "";
+        if (start == -1) return null;
 
         start += pattern.length();
-        int end = json.indexOf("\"", start);
 
-        if (end == -1) return "";
+        StringBuilder value = new StringBuilder();
+        boolean escaping = false;
 
-        return json.substring(start, end);
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
+
+            if (escaping) {
+                value.append(unescapeChar(c));
+                escaping = false;
+            } else if (c == '\\') {
+                escaping = true;
+            } else if (c == '"') {
+                break;
+            } else {
+                value.append(c);
+            }
+        }
+
+        return value.toString();
     }
 
     // ======================
-    // Utility (FIXED escaping)
+    // Escape handling
     // ======================
     private String safe(Object value) {
         if (value == null) return "";
 
         return value.toString()
-                .replace("\\", "\\\\")   // escape backslash
-                .replace("\"", "\\\"");  // escape quotes
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
+    private static char unescapeChar(char c) {
+        switch (c) {
+            case 'n': return '\n';
+            case 'r': return '\r';
+            case 't': return '\t';
+            case '\\': return '\\';
+            case '"': return '"';
+            default: return c;
+        }
     }
 }

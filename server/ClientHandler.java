@@ -6,6 +6,7 @@ import common.MessageValidator;
 
 import java.io.*;
 import java.net.Socket;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ClientHandler implements Runnable {
@@ -16,13 +17,17 @@ public class ClientHandler implements Runnable {
     private String username;
 
     private final ConcurrentHashMap<String, ClientHandler> clients;
+    private final RoomManager roomManager;
 
     private volatile boolean active = false;
     private volatile boolean cleanedUp = false;
 
-    public ClientHandler(Socket socket, ConcurrentHashMap<String, ClientHandler> clients) {
+    public ClientHandler(Socket socket,
+                         ConcurrentHashMap<String, ClientHandler> clients,
+                         RoomManager roomManager) {
         this.socket = socket;
         this.clients = clients;
+        this.roomManager = roomManager;
     }
 
     @Override
@@ -49,7 +54,7 @@ public class ClientHandler implements Runnable {
     }
 
     // ==============================
-    // 🔥 REGISTRATION (UPDATED)
+    // REGISTRATION
     // ==============================
     private boolean registerClient() throws IOException {
 
@@ -70,22 +75,24 @@ public class ClientHandler implements Runnable {
             return false;
         }
 
-        // 🔥 RECONNECT SUPPORT
         ClientHandler existing = clients.get(requestedName);
 
         if (existing != null) {
             System.out.println("[RECONNECT] Replacing old session for " + requestedName);
-            existing.forceDisconnect(); // kill old connection
+            existing.forceDisconnect();
         }
 
         username = requestedName;
         clients.put(username, this);
 
-        System.out.println("[USER REGISTERED] " + username);
-        System.out.println("[STATE] Clients: " + clients.keySet());
+        // ✅ Join default room
+        roomManager.joinRoom("global", this);
 
         send(MessageFactory.system("Welcome " + username + "!"));
-        broadcast(MessageFactory.system(username + " joined the chat."));
+
+        // 🔥 Notify global room
+        broadcastToRoom("global",
+                MessageFactory.system("[ROOM global]: " + username + " joined"));
 
         return true;
     }
@@ -159,7 +166,19 @@ public class ClientHandler implements Runnable {
                 break;
 
             case "EXIT":
-                active = false; // let loop exit naturally
+                active = false;
+                break;
+
+            case "JOIN":
+                joinRoom(msg.getContent());
+                break;
+
+            case "LEAVE":
+                leaveRoom();
+                break;
+
+            case "ROOMS":
+                listRooms();
                 break;
 
             default:
@@ -167,6 +186,58 @@ public class ClientHandler implements Runnable {
         }
     }
 
+    // ==============================
+    // ROOM COMMANDS (UPGRADED)
+    // ==============================
+    private void joinRoom(String roomName) {
+
+        if (roomName == null || roomName.trim().isEmpty()) {
+            send(MessageFactory.error("Room name cannot be empty."));
+            return;
+        }
+
+        String newRoom = roomName.trim();
+        String oldRoom = roomManager.getClientRoom(this);
+
+        // 🔥 Notify old room
+        if (oldRoom != null) {
+            broadcastToRoom(oldRoom,
+                    MessageFactory.system("[ROOM " + oldRoom + "]: " + username + " left"));
+        }
+
+        roomManager.joinRoom(newRoom, this);
+
+        send(MessageFactory.system("Joined room: " + newRoom));
+
+        // 🔥 Notify new room
+        broadcastToRoom(newRoom,
+                MessageFactory.system("[ROOM " + newRoom + "]: " + username + " joined"));
+    }
+
+    private void leaveRoom() {
+
+        String oldRoom = roomManager.getClientRoom(this);
+
+        if (oldRoom != null) {
+            broadcastToRoom(oldRoom,
+                    MessageFactory.system("[ROOM " + oldRoom + "]: " + username + " left"));
+        }
+
+        roomManager.joinRoom("global", this);
+
+        send(MessageFactory.system("Returned to global room"));
+
+        broadcastToRoom("global",
+                MessageFactory.system("[ROOM global]: " + username + " joined"));
+    }
+
+    private void listRooms() {
+        send(MessageFactory.system("Rooms: " + roomManager.getAllRooms()));
+    }
+
+    // ==============================
+    // USER MANAGEMENT
+    // ==============================
     private void sendUserList() {
         send(MessageFactory.system(
                 "Online Users: " + String.join(", ", clients.keySet())
@@ -209,14 +280,24 @@ public class ClientHandler implements Runnable {
     }
 
     // ==============================
-    // MESSAGING
+    // ROOM BROADCAST (NEW)
     // ==============================
-    private void broadcast(Message msg) {
-        for (ClientHandler client : clients.values()) {
+    private void broadcastToRoom(String room, Message msg) {
+        Set<ClientHandler> members = roomManager.getRoomMembers(room);
+
+        for (ClientHandler client : members) {
             try {
                 client.send(msg);
             } catch (Exception ignored) {}
         }
+    }
+
+    // ==============================
+    // DEFAULT BROADCAST
+    // ==============================
+    private void broadcast(Message msg) {
+        String room = roomManager.getClientRoom(this);
+        broadcastToRoom(room, msg);
     }
 
     private void send(Message msg) {
@@ -226,7 +307,7 @@ public class ClientHandler implements Runnable {
     }
 
     // ==============================
-    // 🔥 FORCE DISCONNECT (NEW)
+    // FORCE DISCONNECT
     // ==============================
     public void forceDisconnect() {
         System.out.println("[FORCE DISCONNECT] " + username);
@@ -234,7 +315,7 @@ public class ClientHandler implements Runnable {
     }
 
     // ==============================
-    // CLEANUP (UPDATED)
+    // CLEANUP (UPGRADED)
     // ==============================
     private void cleanup() {
 
@@ -249,6 +330,17 @@ public class ClientHandler implements Runnable {
 
                 if (removed) {
                     System.out.println("[USER LEFT] " + username);
+
+                    String room = roomManager.getClientRoom(this);
+
+                    // 🔥 notify room BEFORE removal
+                    if (room != null) {
+                        broadcastToRoom(room,
+                                MessageFactory.system("[ROOM " + room + "]: " + username + " left"));
+                    }
+
+                    roomManager.removeClient(this);
+
                     broadcast(MessageFactory.system(username + " left the chat."));
                 }
             }

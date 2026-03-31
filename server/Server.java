@@ -4,9 +4,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 
 public class Server {
 
@@ -15,8 +13,18 @@ public class Server {
     // ✅ Shared client registry
     private static final ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>();
 
-    // 🔥 Bounded thread pool (safer than cached)
-    private static final ExecutorService threadPool = Executors.newFixedThreadPool(50);
+    // ✅ Room Manager
+    private static final RoomManager roomManager = new RoomManager();
+
+    // 🔥 Bounded thread pool with queue (PRODUCTION SAFE)
+    private static final ExecutorService threadPool =
+            new ThreadPoolExecutor(
+                    20,                 // core threads
+                    50,                 // max threads
+                    60L, TimeUnit.SECONDS,
+                    new LinkedBlockingQueue<>(100), // bounded queue
+                    new ThreadPoolExecutor.AbortPolicy() // reject if overloaded
+            );
 
     private static volatile boolean running = true;
     private static ServerSocket serverSocket;
@@ -26,7 +34,7 @@ public class Server {
     }
 
     private static void startServer() {
-        System.out.println("[SERVER] [START] Server is starting...");
+        System.out.println("[SERVER] [START] Starting server...");
 
         try {
             serverSocket = new ServerSocket(PORT);
@@ -37,13 +45,22 @@ public class Server {
                 try {
                     Socket socket = serverSocket.accept();
 
+                    // 🔥 Basic socket tuning
+                    socket.setKeepAlive(true);
+                    socket.setTcpNoDelay(true);
+
                     System.out.println("[SERVER] [NEW CONNECTION] " + socket.getInetAddress());
 
-                    ClientHandler handler = new ClientHandler(socket, clients);
-                    threadPool.execute(handler);
+                    ClientHandler handler = new ClientHandler(socket, clients, roomManager);
+
+                    try {
+                        threadPool.execute(handler);
+                    } catch (RejectedExecutionException e) {
+                        System.out.println("[SERVER] [OVERLOAD] Too many connections. Rejecting client.");
+                        socket.close();
+                    }
 
                 } catch (SocketException e) {
-                    // 🔥 Happens when serverSocket is closed during shutdown
                     if (!running) break;
                     System.out.println("[SERVER] [ERROR] Socket issue: " + e.getMessage());
                 }
@@ -57,7 +74,7 @@ public class Server {
     }
 
     // ==============================
-    // Graceful Shutdown
+    // Graceful Shutdown (IMPROVED)
     // ==============================
     private static void shutdown() {
         System.out.println("[SERVER] [SHUTDOWN] Shutting down server...");
@@ -66,16 +83,22 @@ public class Server {
 
         try {
             if (serverSocket != null && !serverSocket.isClosed()) {
-                serverSocket.close(); // 🔥 unblocks accept()
+                serverSocket.close();
             }
         } catch (IOException e) {
             System.out.println("[SERVER] [ERROR] Closing socket failed: " + e.getMessage());
         }
 
+        // 🔥 Stop accepting new tasks
+        threadPool.shutdown();
+
         try {
+            // wait for active tasks to finish
+            if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                threadPool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
             threadPool.shutdownNow();
-        } catch (Exception e) {
-            System.out.println("[SERVER] [ERROR] Thread pool shutdown issue: " + e.getMessage());
         }
 
         System.out.println("[SERVER] [STOPPED]");
