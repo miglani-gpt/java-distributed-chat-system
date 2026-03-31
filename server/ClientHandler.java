@@ -18,7 +18,7 @@ public class ClientHandler implements Runnable {
     private final ConcurrentHashMap<String, ClientHandler> clients;
 
     private volatile boolean active = false;
-    private volatile boolean cleanedUp = false; // 🔥 prevent double cleanup
+    private volatile boolean cleanedUp = false;
 
     public ClientHandler(Socket socket, ConcurrentHashMap<String, ClientHandler> clients) {
         this.socket = socket;
@@ -49,7 +49,7 @@ public class ClientHandler implements Runnable {
     }
 
     // ==============================
-    // Registration
+    // 🔥 REGISTRATION (UPDATED)
     // ==============================
     private boolean registerClient() throws IOException {
 
@@ -65,9 +65,17 @@ public class ClientHandler implements Runnable {
 
         String requestedName = initMsg.getSender().trim();
 
-        if (requestedName.isEmpty() || clients.containsKey(requestedName)) {
-            send(MessageFactory.error("Invalid or duplicate username."));
+        if (requestedName.isEmpty()) {
+            send(MessageFactory.error("Username cannot be empty."));
             return false;
+        }
+
+        // 🔥 RECONNECT SUPPORT
+        ClientHandler existing = clients.get(requestedName);
+
+        if (existing != null) {
+            System.out.println("[RECONNECT] Replacing old session for " + requestedName);
+            existing.forceDisconnect(); // kill old connection
         }
 
         username = requestedName;
@@ -83,7 +91,7 @@ public class ClientHandler implements Runnable {
     }
 
     // ==============================
-    // Main Loop
+    // MAIN LOOP
     // ==============================
     private void processMessages() throws IOException {
 
@@ -116,7 +124,7 @@ public class ClientHandler implements Runnable {
                     handleCommand(msg);
                     break;
 
-                case PING: // ❤️ heartbeat
+                case PING:
                     send(MessageFactory.pong());
                     break;
 
@@ -125,33 +133,12 @@ public class ClientHandler implements Runnable {
             }
         }
 
-        // 🔥 graceful disconnect log
         System.out.println("[DISCONNECTED] " + username);
     }
 
     // ==============================
-    // Handlers
+    // COMMANDS
     // ==============================
-    private void handlePrivate(Message msg) {
-
-        String target = msg.getReceiver();
-        ClientHandler receiver = clients.get(target);
-
-        if (receiver == null) {
-            send(MessageFactory.error("User not found: " + target));
-            return;
-        }
-
-        Message privateMsg = MessageFactory.privateMsg(
-                username,
-                target,
-                msg.getContent()
-        );
-
-        receiver.send(privateMsg);
-        send(privateMsg);
-    }
-
     private void handleCommand(Message msg) {
 
         String command = msg.getCommand();
@@ -172,7 +159,7 @@ public class ClientHandler implements Runnable {
                 break;
 
             case "EXIT":
-                cleanup();
+                active = false; // let loop exit naturally
                 break;
 
             default:
@@ -195,7 +182,7 @@ public class ClientHandler implements Runnable {
 
         String oldName = username;
 
-        clients.remove(oldName);
+        clients.remove(oldName, this);
         username = newName.trim();
         clients.put(username, this);
 
@@ -203,7 +190,26 @@ public class ClientHandler implements Runnable {
     }
 
     // ==============================
-    // Messaging
+    // PRIVATE MESSAGE
+    // ==============================
+    private void handlePrivate(Message msg) {
+
+        String target = msg.getReceiver();
+        ClientHandler receiver = clients.get(target);
+
+        if (receiver == null) {
+            send(MessageFactory.error("User not found: " + target));
+            return;
+        }
+
+        Message privateMsg = MessageFactory.privateMsg(username, target, msg.getContent());
+
+        receiver.send(privateMsg);
+        send(privateMsg);
+    }
+
+    // ==============================
+    // MESSAGING
     // ==============================
     private void broadcast(Message msg) {
         for (ClientHandler client : clients.values()) {
@@ -220,18 +226,31 @@ public class ClientHandler implements Runnable {
     }
 
     // ==============================
-    // Cleanup
+    // 🔥 FORCE DISCONNECT (NEW)
+    // ==============================
+    public void forceDisconnect() {
+        System.out.println("[FORCE DISCONNECT] " + username);
+        cleanup();
+    }
+
+    // ==============================
+    // CLEANUP (UPDATED)
     // ==============================
     private void cleanup() {
 
         if (cleanedUp) return;
         cleanedUp = true;
 
+        active = false;
+
         try {
-            if (username != null && clients.containsKey(username)) {
-                clients.remove(username);
-                System.out.println("[USER LEFT] " + username);
-                broadcast(MessageFactory.system(username + " left the chat."));
+            if (username != null) {
+                boolean removed = clients.remove(username, this);
+
+                if (removed) {
+                    System.out.println("[USER LEFT] " + username);
+                    broadcast(MessageFactory.system(username + " left the chat."));
+                }
             }
 
             if (socket != null && !socket.isClosed()) {
