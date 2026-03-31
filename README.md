@@ -1,128 +1,247 @@
-# Distributed Chat System
+# 🚀 Distributed Chat System
 
-A Java-based client-server application that demonstrates TCP socket communication, clean separation of concerns, and foundational backend system design.
+A production-style distributed chat system built in Java using TCP sockets, multithreading, and a custom message protocol.
 
----
-
-## Overview
-
-This project implements a basic chat system using a client-server architecture over TCP. A client connects to a server, sends messages via standard input, and the server processes and logs those messages in real time.
-
-The implementation focuses on correctness, clarity, and maintainability rather than feature complexity.
+This project goes beyond a basic chat app by implementing **fault tolerance, auto-reconnect, session recovery, and concurrent client handling**, making it a strong demonstration of backend system design.
 
 ---
 
-## Features
+## 📌 Overview
 
-* TCP communication using Java sockets
-* Client-server architecture
-* Console-based message input
-* Real-time message handling on the server
-* Graceful client disconnection using a command (`exit`)
-* Structured logging for observability
-* Automatic resource management using try-with-resources
-* Basic error handling for connection and runtime failures
+This system follows a **client-server architecture** where multiple clients communicate through a central server over TCP.
 
----
+Key focus areas:
 
-## Technology Stack
-
-* Language: Java
-* Networking: Socket, ServerSocket (TCP)
-* I/O: BufferedReader, PrintWriter
+* Concurrency and thread safety
+* Fault tolerance and recovery
+* Clean protocol design
+* Maintainable and modular architecture
 
 ---
 
-## Project Structure
+## ⚡ Key Features
+
+### 🧱 Core System
+
+* Multi-client support using `ExecutorService`
+* Thread-safe client registry using `ConcurrentHashMap`
+* Clean client lifecycle management (connect, disconnect, cleanup)
+
+---
+
+### 💬 Messaging System
+
+* Broadcast messaging
+* Private messaging (`/msg`)
+* Structured message model:
+
+  * `type`, `sender`, `receiver`, `content`, `command`
+* Centralized message creation (`MessageFactory`)
+* Message validation layer (`MessageValidator`)
+
+---
+
+### 🧭 Command System
+
+* `/list` → list active users
+* `/msg <user> <message>` → private messaging
+* `/name <newname>` → change username
+* `/exit` → disconnect
+
+---
+
+### ❤️ Fault Tolerance (Advanced)
+
+#### 🔄 Auto-Reconnect Mechanism
+
+* Client automatically reconnects on connection loss
+* Exponential backoff strategy (2s → 4s → 8s...)
+* Max retry limit to prevent infinite loops
+
+#### 💓 Heartbeat Monitoring
+
+* Client sends `PING` every 3 seconds
+* Server responds with `PONG`
+* Client detects failure after 15 seconds
+
+#### 🔁 Session Recovery
+
+* Username reused after reconnect
+* Server replaces stale sessions safely
+* Prevents duplicate users and ghost clients
+
+---
+
+### 🧵 Concurrency Design
+
+* Thread pool (`ExecutorService`) for scalable client handling
+* Separate client-side threads:
+
+  * Listener thread
+  * Heartbeat thread
+  * Monitor thread
+* Safe shared state using concurrent collections
+
+---
+
+### 📡 Protocol Design
+
+* Custom JSON-based message protocol
+* Message types:
+
+  * `CHAT`, `PRIVATE`, `SYSTEM`, `COMMAND`, `ERROR`, `PING`, `PONG`
+* Clean separation between commands and message types
+
+---
+
+## 🛠️ Technology Stack
+
+* **Language:** Java
+* **Networking:** TCP (Socket, ServerSocket)
+* **Concurrency:** Thread, ExecutorService
+* **Data Structures:** ConcurrentHashMap
+* **I/O:** BufferedReader, PrintWriter
+
+---
+
+## 📁 Project Structure
 
 ```
 java-distributed-chat-system/
 │
 ├── server/
-│   └── Server.java
+│   ├── Server.java
+│   └── ClientHandler.java
 │
 ├── client/
 │   └── Client.java
 │
 ├── common/
+│   ├── Message.java
+│   ├── MessageType.java
+│   ├── MessageFactory.java
+│   └── MessageValidator.java
 │
 └── README.md
 ```
 
 ---
 
-## Communication Model
+## 🧠 Architecture Overview
 
 ```
-Client → Socket → ServerSocket → Server
+        +-------------------+
+        |      Clients      |
+        | (Multiple Nodes)  |
+        +---------+---------+
+                  |
+                  | TCP
+                  |
+        +---------v---------+
+        |       Server      |
+        |  Thread Pool      |
+        |  (ExecutorService)|
+        +---------+---------+
+                  |
+        +---------v---------+
+        | Concurrent Client |
+        |   Registry Map    |
+        +-------------------+
 ```
-
-* The client sends messages using a PrintWriter
-* The server reads messages using a BufferedReader
-* Communication is line-oriented and blocking
 
 ---
 
-## Running the Application
+## ▶️ Running the Application
 
-### Compile
+### 1. Compile
 
+```bash
+javac server/*.java
+javac client/*.java
+javac common/*.java
 ```
-javac server/Server.java
-javac client/Client.java
-```
 
-### Start the Server
+---
 
-```
+### 2. Start Server
+
+```bash
 java server.Server
 ```
 
-### Start the Client
+---
 
-```
+### 3. Start Clients (multiple terminals)
+
+```bash
 java client.Client
 ```
 
 ---
 
-## Usage
+## 💻 Usage
 
-* Enter messages in the client terminal
-* Messages are displayed on the server
-* Enter `exit` to terminate the client connection
+* Enter username on startup
+* Send messages directly
+* Use commands:
 
----
-
-## Testing
-
-The following scenarios have been validated:
-
-* Normal message exchange between client and server
-* Graceful client disconnection
-* Abrupt termination of client (process kill)
-* Client connection failure when server is unavailable
+  * `/list`
+  * `/msg user message`
+  * `/name newname`
+  * `/exit`
 
 ---
 
-## Limitations
+## 🧪 Testing Scenarios
 
-* Supports a single client connection
-* Uses blocking I/O
-* No message routing or broadcasting
+### ✅ Functional
+
+* Multi-client messaging
+* Private messaging
+* Username changes
+
+### 🔥 Fault Tolerance
+
+* Server crash and restart → clients auto-reconnect
+* Network failure simulation → retry with backoff
+* Multiple clients reconnect simultaneously
+
+### 🧹 Stability
+
+* No duplicate users after reconnect
+* No ghost clients
+* No thread leaks
 
 ---
 
-## Design Considerations
+## ⚠️ Limitations
 
-* Uses try-with-resources to ensure deterministic cleanup of sockets and streams
-* Keeps client and server responsibilities clearly separated
-* Uses structured logging to improve debuggability
-* Maintains minimal complexity while ensuring correctness
+* No persistent message storage
+* No group chat / rooms (planned)
+* No GUI (CLI-based interaction)
+* No encryption (plain TCP)
 
 ---
 
-## Author
+## 🔮 Future Improvements
 
-Satvik Miglani
+* Group chat / rooms
+* Message persistence (file/database)
+* GUI (JavaFX/Swing)
+* Protocol versioning
+* Authentication system
 
+---
+
+## 🏁 Key Learnings
+
+* Designing fault-tolerant distributed systems
+* Handling concurrency safely in Java
+* Building resilient client-server communication
+* Managing connection lifecycle and recovery
+
+---
+
+## 👤 Author
+
+**Satvik Miglani**
