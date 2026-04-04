@@ -2,43 +2,51 @@ package common;
 
 import java.util.Set;
 
-public class MessageValidator {
+public final class MessageValidator {
 
-    // ✅ Centralized command registry (EXTENSIBLE)
+    // ==============================
+    // Command Registry
+    // ==============================
     private static final Set<String> VALID_COMMANDS = Set.of(
             "LIST",
             "EXIT",
             "NAME",
-            "JOIN",     // ✅ NEW
-            "LEAVE",    // ✅ NEW
-            "ROOMS"     // ✅ NEW
+            "JOIN",
+            "LEAVE",
+            "ROOMS"
     );
 
+    // ==============================
+    // Entry Point
+    // ==============================
     public static boolean isValid(Message msg) {
 
-        if (msg == null || msg.getType() == null) return false;
+        if (msg == null) return false;
 
-        switch (msg.getType()) {
+        MessageType type = msg.getType();
+        if (type == null) return false;
+
+        switch (type) {
 
             case CHAT:
-                return notEmpty(msg.getSender()) &&
-                       notEmpty(msg.getContent());
+                return require(msg.getSender(), msg.getContent());
 
             case PRIVATE:
-                return notEmpty(msg.getSender()) &&
-                       notEmpty(msg.getReceiver()) &&
-                       notEmpty(msg.getContent());
+                return require(msg.getSender(), msg.getReceiver(), msg.getContent());
 
             case COMMAND:
                 return validateCommand(msg);
 
             case SYSTEM:
             case ERROR:
-                return true; // relaxed (intentional)
+                // Optional: enforce at least content
+                return msg.getContent() != null;
 
             case PING:
+                return notEmpty(msg.getSender());
+
             case PONG:
-                return true; // heartbeat always allowed
+                return true; // server-controlled
 
             default:
                 return false;
@@ -46,20 +54,16 @@ public class MessageValidator {
     }
 
     // ==============================
-    // Command Validation (UPGRADED)
+    // Command Validation
     // ==============================
     private static boolean validateCommand(Message msg) {
 
         String sender = msg.getSender();
-        String command = msg.getCommand();
+        String command = normalize(msg.getCommand());
 
-        if (!notEmpty(sender) || !notEmpty(command)) return false;
+        if (!notEmpty(sender) || command == null) return false;
 
-        command = command.trim().toUpperCase();
-
-        if (!VALID_COMMANDS.contains(command)) {
-            return false;
-        }
+        if (!VALID_COMMANDS.contains(command)) return false;
 
         switch (command) {
 
@@ -67,14 +71,13 @@ public class MessageValidator {
             case "EXIT":
             case "LEAVE":
             case "ROOMS":
-                // ✅ No content required
                 return true;
 
             case "NAME":
                 return notEmpty(msg.getContent());
 
             case "JOIN":
-                return notEmpty(msg.getContent()); // room name required
+                return notEmpty(msg.getContent()); // room name
 
             default:
                 return false;
@@ -82,9 +85,22 @@ public class MessageValidator {
     }
 
     // ==============================
-    // Utility
+    // Utility Helpers
     // ==============================
+    private static boolean require(String... fields) {
+        for (String f : fields) {
+            if (!notEmpty(f)) return false;
+        }
+        return true;
+    }
+
     private static boolean notEmpty(String s) {
         return s != null && !s.trim().isEmpty();
+    }
+
+    private static String normalize(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t.toUpperCase();
     }
 }

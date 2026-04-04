@@ -1,0 +1,141 @@
+.root {
+    -fx-background-color: #1e1e1e;
+    -fx-font-family: "Segoe UI", sans-serif;
+}
+
+/* =========================
+   STATUS BAR
+   ========================= */
+.status-bar {
+    -fx-background-color: #2a2a2a;
+    -fx-text-fill: #cccccc;
+    -fx-padding: 10;
+    -fx-font-size: 13px;
+}
+
+/* =========================
+   INPUT FIELD
+   ========================= */
+.input-field {
+    -fx-background-color: #2d2d2d;
+    -fx-text-fill: white;
+    -fx-background-radius: 20;
+    -fx-padding: 10 14;
+    -fx-alignment: center-left;
+    -fx-border-radius: 20;
+    -fx-border-color: transparent;
+}
+
+.input-field:focused {
+    -fx-border-color: #0078d7;
+}
+
+/* =========================
+   SEND BUTTON
+   ========================= */
+.send-btn {
+    -fx-background-color: #0078d7;
+    -fx-text-fill: white;
+    -fx-background-radius: 20;
+    -fx-padding: 10 18;
+    -fx-font-weight: bold;
+    -fx-cursor: hand;
+}
+
+.send-btn:hover {
+    -fx-background-color: #2196f3;
+}
+
+.send-btn:pressed {
+    -fx-background-color: #005fa3;
+}
+
+/* =========================
+   CHAT BUBBLES
+   ========================= */
+.message-text {
+    -fx-padding: 10 14;
+    -fx-background-radius: 18;
+    -fx-font-size: 13px;
+    -fx-line-spacing: 2px;
+}
+
+/* Hover effect */
+.message-text:hover {
+    -fx-opacity: 0.9;
+}
+
+/* My messages */
+.my-msg {
+    -fx-background-color: #0078d7;
+    -fx-text-fill: white;
+}
+
+/* Other messages */
+.other-msg {
+    -fx-background-color: #2d2d2d;
+    -fx-text-fill: white;
+}
+
+/* System messages */
+.system-msg {
+    -fx-background-color: #3a3a3a;
+    -fx-text-fill: #dddddd;
+    -fx-font-style: italic;
+}
+
+/* =========================
+   USER LIST
+   ========================= */
+.list-view {
+    -fx-background-color: #1e1e1e;
+    -fx-control-inner-background: #1e1e1e;
+    -fx-border-color: #2d2d2d;
+}
+
+.list-cell {
+    -fx-text-fill: #cccccc;
+    -fx-padding: 6 10;
+}
+
+.list-cell:hover {
+    -fx-background-color: #2d2d2d;
+}
+
+.list-cell:selected {
+    -fx-background-color: #0078d7;
+    -fx-text-fill: white;
+}
+
+/* =========================
+   SCROLL BAR (subtle polish)
+   ========================= */
+.scroll-bar:vertical {
+    -fx-background-color: transparent;
+}
+
+.scroll-bar .thumb {
+    -fx-background-color: #444;
+    -fx-background-radius: 10;
+}
+
+.scroll-bar .thumb:hover {
+    -fx-background-color: #666;
+}
+
+/* Sidebar container */
+.vbox {
+    -fx-background-color: #1e1e1e;
+}
+
+/* Users label */
+.label {
+    -fx-text-fill: #bbbbbb;
+    -fx-font-size: 12px;
+}
+
+.sidebar {
+    -fx-background-color: #181818;
+    -fx-border-color: #2d2d2d;
+    -fx-border-width: 0 1 0 0;
+}

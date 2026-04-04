@@ -1,16 +1,23 @@
 package common;
 
-public class MessageFactory {
+public final class MessageFactory {
+
+    private static final String SERVER = "SERVER";
 
     // ==============================
     // CHAT MESSAGE
     // ==============================
     public static Message chat(String sender, String content) {
+        sender = clean(sender);
+        content = clean(content);
+
+        if (sender == null || content == null) return null;
+
         return new Message(
                 MessageType.CHAT,
-                clean(sender),
+                sender,
                 null,
-                clean(content),
+                content,
                 null
         );
     }
@@ -19,11 +26,17 @@ public class MessageFactory {
     // PRIVATE MESSAGE
     // ==============================
     public static Message privateMsg(String sender, String receiver, String content) {
+        sender = clean(sender);
+        receiver = clean(receiver);
+        content = clean(content);
+
+        if (sender == null || receiver == null || content == null) return null;
+
         return new Message(
                 MessageType.PRIVATE,
-                clean(sender),
-                clean(receiver),
-                clean(content),
+                sender,
+                receiver,
+                content,
                 null
         );
     }
@@ -32,12 +45,19 @@ public class MessageFactory {
     // COMMAND MESSAGE
     // ==============================
     public static Message command(String sender, String command, String receiver, String content) {
+        sender = clean(sender);
+        command = normalizeCommand(command);
+        receiver = clean(receiver);
+        content = clean(content);
+
+        if (sender == null || command == null) return null;
+
         return new Message(
                 MessageType.COMMAND,
-                clean(sender),
-                clean(receiver),
-                clean(content),
-                normalizeCommand(command)
+                sender,
+                receiver,
+                content,
+                command
         );
     }
 
@@ -45,9 +65,12 @@ public class MessageFactory {
     // ❤️ HEARTBEAT MESSAGES
     // ==============================
     public static Message ping(String sender) {
+        sender = clean(sender);
+        if (sender == null) return null;
+
         return new Message(
                 MessageType.PING,
-                clean(sender),
+                sender,
                 null,
                 null,
                 null
@@ -57,7 +80,7 @@ public class MessageFactory {
     public static Message pong() {
         return new Message(
                 MessageType.PONG,
-                "SERVER",
+                SERVER,
                 null,
                 null,
                 null
@@ -68,37 +91,42 @@ public class MessageFactory {
     // SYSTEM MESSAGE
     // ==============================
     public static Message system(String content) {
+        content = clean(content);
+        if (content == null) return null;
+
         return new Message(
                 MessageType.SYSTEM,
-                "SERVER",
+                SERVER,
                 null,
-                clean(content),
+                content,
                 null
         );
     }
 
     // ==============================
-    // 🔥 ROOM EVENT (NEW)
+    // ROOM EVENT
     // ==============================
     public static Message roomEvent(String room, String content) {
-        return new Message(
-                MessageType.SYSTEM,
-                "SERVER",
-                null,
-                formatRoomMessage(room, content),
-                null
-        );
-    }
+    room = clean(room);
+    content = clean(content);
+
+    if (room == null || content == null) return null;
+
+    return system("[ROOM " + room + "] " + content);
+}
 
     // ==============================
     // ERROR MESSAGE
     // ==============================
     public static Message error(String content) {
+        content = clean(content);
+        if (content == null) return null;
+
         return new Message(
                 MessageType.ERROR,
-                "SERVER",
+                SERVER,
                 null,
-                clean(content),
+                content,
                 null
         );
     }
@@ -116,12 +144,5 @@ public class MessageFactory {
         if (command == null) return null;
         String trimmed = command.trim();
         return trimmed.isEmpty() ? null : trimmed.toUpperCase();
-    }
-
-    // ==============================
-    // 🔥 ROOM FORMATTER (NEW)
-    // ==============================
-    private static String formatRoomMessage(String room, String content) {
-        return "[ROOM " + room + "]: " + content;
     }
 }

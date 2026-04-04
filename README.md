@@ -1,106 +1,155 @@
-# 🚀 Distributed Chat System
+# 🚀 Distributed Chat System (JavaFX)
 
-A production-style distributed chat system built in Java using TCP sockets, multithreading, and a custom message protocol.
+A **production-style distributed chat system** built in Java using TCP sockets, multithreading, and a structured message protocol, featuring a **modern JavaFX GUI**.
 
-This project goes beyond a basic chat app by implementing **fault tolerance, auto-reconnect, session recovery, and concurrent client handling**, making it a strong demonstration of backend system design.
-
----
-
-## 📌 Overview
-
-This system follows a **client-server architecture** where multiple clients communicate through a central server over TCP.
-
-Key focus areas:
-
-* Concurrency and thread safety
-* Fault tolerance and recovery
-* Clean protocol design
-* Maintainable and modular architecture
+This project demonstrates **real-world backend + frontend system design**, including fault tolerance, concurrency, session recovery, and real-time UI updates.
 
 ---
 
-## ⚡ Key Features
+## 📌 Highlights
+
+* 💬 Real-time multi-client chat system
+* 🎨 Modern JavaFX GUI with chat bubbles
+* 👥 Live user list panel
+* 🏠 Room-based messaging system
+* 🔁 Automatic reconnection with exponential backoff
+* ❤️ Heartbeat-based failure detection (PING/PONG)
+* 🧵 Thread-safe concurrent architecture
+* 🧠 Structured message protocol (no string parsing)
+
+---
+
+## 🧠 Architecture
+
+```text
+        +-------------------+
+        |      Clients      |
+        | (JavaFX GUI)      |
+        +---------+---------+
+                  |
+                  | TCP
+                  |
+        +---------v---------+
+        |       Server      |
+        |  Thread Pool      |
+        +---------+---------+
+                  |
+        +---------v---------+
+        | Concurrent Client |
+        |   Registry Map    |
+        +-------------------+
+```
+
+---
+
+## ⚡ Features
 
 ### 🧱 Core System
 
-* Multi-client support using `ExecutorService`
-* Thread-safe client registry using `ConcurrentHashMap`
-* Clean client lifecycle management (connect, disconnect, cleanup)
+* Multi-client handling using `ExecutorService`
+* Thread-safe client registry (`ConcurrentHashMap`)
+* Clean connection lifecycle management
 
 ---
 
-### 💬 Messaging System
+### 💬 Messaging
 
-* Broadcast messaging
+* Public room-based messaging
 * Private messaging (`/msg`)
 * Structured message model:
 
   * `type`, `sender`, `receiver`, `content`, `command`
 * Centralized message creation (`MessageFactory`)
-* Message validation layer (`MessageValidator`)
 
 ---
 
-### 🧭 Command System
+### 🏠 Room System
 
-* `/list` → list active users
-* `/msg <user> <message>` → private messaging
-* `/name <newname>` → change username
-* `/exit` → disconnect
+* Dynamic room creation (`/join roomName`)
+* Automatic room switching
+* Room isolation (messages visible only within room)
+* `/rooms` command to list rooms
 
 ---
 
-### ❤️ Fault Tolerance (Advanced)
+### 🧭 Commands
 
-#### 🔄 Auto-Reconnect Mechanism
+| Command             | Description           |
+| ------------------- | --------------------- |
+| `/list`             | Show active users     |
+| `/msg user message` | Private message       |
+| `/name newname`     | Change username       |
+| `/join room`        | Join/create a room    |
+| `/leave`            | Return to global room |
+| `/rooms`            | List available rooms  |
+| `/exit`             | Disconnect            |
 
-* Client automatically reconnects on connection loss
-* Exponential backoff strategy (2s → 4s → 8s...)
-* Max retry limit to prevent infinite loops
+---
 
-#### 💓 Heartbeat Monitoring
+### 🎨 GUI Features (JavaFX)
+
+* 💬 Chat bubbles (left/right aligned)
+* 🕒 Message timestamps
+* 👥 Live user list panel
+* 🎯 Message styling (system / private / normal)
+* ⚡ Smooth auto-scroll
+* ✨ Message fade-in animation
+* 🧠 Keyboard support (Enter to send)
+* 🎨 Dark modern UI theme
+
+---
+
+### ❤️ Fault Tolerance
+
+#### 🔄 Auto-Reconnect
+
+* Automatic reconnection on failure
+* Exponential backoff: `2s → 4s → 8s`
+* Retry limit to prevent infinite loops
+
+#### 💓 Heartbeat System
 
 * Client sends `PING` every 3 seconds
-* Server responds with `PONG`
-* Client detects failure after 15 seconds
+* Server replies with `PONG`
+* Detects connection loss within 15 seconds
 
 #### 🔁 Session Recovery
 
-* Username reused after reconnect
-* Server replaces stale sessions safely
-* Prevents duplicate users and ghost clients
+* Username reuse after reconnect
+* Old sessions safely replaced
+* Prevents ghost users
 
 ---
 
 ### 🧵 Concurrency Design
 
-* Thread pool (`ExecutorService`) for scalable client handling
-* Separate client-side threads:
+* Thread pool for scalable server handling
+* Client uses:
 
   * Listener thread
   * Heartbeat thread
   * Monitor thread
-* Safe shared state using concurrent collections
+* Thread-safe shared state
 
 ---
 
 ### 📡 Protocol Design
 
-* Custom JSON-based message protocol
+* Custom structured message protocol
 * Message types:
 
   * `CHAT`, `PRIVATE`, `SYSTEM`, `COMMAND`, `ERROR`, `PING`, `PONG`
-* Clean separation between commands and message types
+* Eliminates fragile string parsing
 
 ---
 
-## 🛠️ Technology Stack
+## 🛠️ Tech Stack
 
 * **Language:** Java
+* **UI:** JavaFX
 * **Networking:** TCP (Socket, ServerSocket)
 * **Concurrency:** Thread, ExecutorService
 * **Data Structures:** ConcurrentHashMap
-* **I/O:** BufferedReader, PrintWriter
 
 ---
 
@@ -114,7 +163,11 @@ java-distributed-chat-system/
 │   └── ClientHandler.java
 │
 ├── client/
-│   └── Client.java
+│   ├── Client.java
+│   ├── ChatFX.java
+│   ├── ChatView.java
+│   ├── ChatController.java
+│   └── style.css
 │
 ├── common/
 │   ├── Message.java
@@ -127,118 +180,72 @@ java-distributed-chat-system/
 
 ---
 
-## 🧠 Architecture Overview
-
-```
-        +-------------------+
-        |      Clients      |
-        | (Multiple Nodes)  |
-        +---------+---------+
-                  |
-                  | TCP
-                  |
-        +---------v---------+
-        |       Server      |
-        |  Thread Pool      |
-        |  (ExecutorService)|
-        +---------+---------+
-                  |
-        +---------v---------+
-        | Concurrent Client |
-        |   Registry Map    |
-        +-------------------+
-```
-
----
-
 ## ▶️ Running the Application
 
-### 1. Compile
+### 1️⃣ Compile
 
 ```bash
-javac server/*.java
-javac client/*.java
-javac common/*.java
+javac --module-path /usr/share/openjfx/lib \
+      --add-modules javafx.controls,javafx.fxml \
+      */*.java
 ```
 
----
-
-### 2. Start Server
+### 2️⃣ Start Server
 
 ```bash
 java server.Server
 ```
 
----
-
-### 3. Start Clients (multiple terminals)
+### 3️⃣ Start Client(s)
 
 ```bash
-java client.Client
+java --module-path /usr/share/openjfx/lib \
+     --add-modules javafx.controls,javafx.fxml \
+     client.ChatFX
 ```
 
 ---
 
-## 💻 Usage
-
-* Enter username on startup
-* Send messages directly
-* Use commands:
-
-  * `/list`
-  * `/msg user message`
-  * `/name newname`
-  * `/exit`
-
----
-
-## 🧪 Testing Scenarios
+## 🧪 Testing
 
 ### ✅ Functional
 
-* Multi-client messaging
+* Multi-client chat
 * Private messaging
-* Username changes
+* Room switching
 
 ### 🔥 Fault Tolerance
 
-* Server crash and restart → clients auto-reconnect
-* Network failure simulation → retry with backoff
-* Multiple clients reconnect simultaneously
-
-### 🧹 Stability
-
-* No duplicate users after reconnect
-* No ghost clients
-* No thread leaks
+* Server crash → auto-reconnect
+* Network drop → retry logic
+* Multiple reconnects handled safely
 
 ---
 
 ## ⚠️ Limitations
 
-* No persistent message storage
-* No group chat / rooms (planned)
-* No GUI (CLI-based interaction)
+* No message persistence
+* No authentication
 * No encryption (plain TCP)
 
 ---
 
 ## 🔮 Future Improvements
 
-* Group chat / rooms
-* Message persistence (file/database)
-* GUI (JavaFX/Swing)
-* Protocol versioning
-* Authentication system
+* 💾 Message persistence (database)
+* 🔐 Authentication system
+* 📁 File sharing
+* 📱 Mobile/web client
+* 🌐 WebSocket support
 
 ---
 
-## 🏁 Key Learnings
+## 🧠 Key Learnings
 
-* Designing fault-tolerant distributed systems
-* Handling concurrency safely in Java
-* Building resilient client-server communication
-* Managing connection lifecycle and recovery
+* Designing distributed systems
+* Managing concurrency in Java
+* Building real-time UI with JavaFX
+* Handling fault tolerance and recovery
 
 ---
 

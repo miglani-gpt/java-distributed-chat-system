@@ -1,5 +1,6 @@
 package server;
 
+import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -15,78 +16,104 @@ public class RoomManager {
     }
 
     // ==============================
-    // Join Room (NON-BLOCKING)
+    // JOIN ROOM (STRONGER CONSISTENCY)
     // ==============================
     public void joinRoom(String room, ClientHandler client) {
 
-        String normalizedRoom = normalize(room);
+        String newRoom = normalize(room);
 
-        leaveCurrentRoom(client);
+        synchronized (client) { // 🔥 per-client lock (clean & effective)
 
-        rooms.putIfAbsent(normalizedRoom, ConcurrentHashMap.newKeySet());
-        rooms.get(normalizedRoom).add(client);
+            String oldRoom = clientRooms.get(client);
 
-        clientRooms.put(client, normalizedRoom);
+            if (newRoom.equals(oldRoom)) return;
+
+            // Remove from old
+            if (oldRoom != null) {
+                removeFromRoom(oldRoom, client);
+            }
+
+            // Add to new
+            rooms.computeIfAbsent(newRoom, r -> ConcurrentHashMap.newKeySet())
+                 .add(client);
+
+            clientRooms.put(client, newRoom);
+        }
     }
 
     // ==============================
-    // Leave Current Room
+    // LEAVE CURRENT ROOM
     // ==============================
     public void leaveCurrentRoom(ClientHandler client) {
 
-        String currentRoom = clientRooms.get(client);
+        synchronized (client) {
 
-        if (currentRoom != null) {
-            Set<ClientHandler> clients = rooms.get(currentRoom);
+            String room = clientRooms.remove(client);
 
-            if (clients != null) {
-                clients.remove(client);
-
-                // 🔥 cleanup empty rooms (except default)
-                if (clients.isEmpty() && !currentRoom.equals(DEFAULT_ROOM)) {
-                    rooms.remove(currentRoom);
-                }
+            if (room != null) {
+                removeFromRoom(room, client);
             }
         }
-
-        clientRooms.remove(client);
     }
 
     // ==============================
-    // Get Room Members (SAFE)
+    // INTERNAL REMOVE
+    // ==============================
+    private void removeFromRoom(String room, ClientHandler client) {
+
+        Set<ClientHandler> members = rooms.get(room);
+
+        if (members != null) {
+            members.remove(client);
+
+            // safer cleanup
+            if (members.isEmpty() && !room.equals(DEFAULT_ROOM)) {
+                rooms.remove(room, members);
+            }
+        }
+    }
+
+    // ==============================
+    // GET ROOM MEMBERS
     // ==============================
     public Set<ClientHandler> getRoomMembers(String room) {
-        String normalizedRoom = normalize(room);
-        Set<ClientHandler> members = rooms.get(normalizedRoom);
-        return members != null ? members : ConcurrentHashMap.newKeySet();
+
+        String normalized = normalize(room);
+        Set<ClientHandler> members = rooms.get(normalized);
+
+        if (members == null) return Collections.emptySet();
+
+        // 🔥 return safe view
+        return Collections.unmodifiableSet(members);
     }
 
     // ==============================
-    // Get Client Room
+    // GET CLIENT ROOM
     // ==============================
     public String getClientRoom(ClientHandler client) {
-        return clientRooms.getOrDefault(client, DEFAULT_ROOM);
+        return clientRooms.get(client);
     }
 
     // ==============================
-    // List Rooms
+    // LIST ROOMS
     // ==============================
     public Set<String> getAllRooms() {
-        return rooms.keySet();
+        return Collections.unmodifiableSet(rooms.keySet());
     }
 
     // ==============================
-    // Cleanup
+    // REMOVE CLIENT
     // ==============================
     public void removeClient(ClientHandler client) {
         leaveCurrentRoom(client);
     }
 
     // ==============================
-    // 🔥 Normalization (NEW)
+    // NORMALIZE
     // ==============================
     private String normalize(String room) {
         if (room == null) return DEFAULT_ROOM;
-        return room.trim().toLowerCase();
+        String trimmed = room.trim().toLowerCase();
+        return trimmed.isEmpty() ? DEFAULT_ROOM : trimmed;
     }
 }

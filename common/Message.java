@@ -1,5 +1,7 @@
 package common;
 
+import java.util.Objects;
+
 public class Message {
 
     private MessageType type;
@@ -9,22 +11,14 @@ public class Message {
     private String command;
 
     // ======================
-    // Constructors
+    // Constructor
     // ======================
     public Message(MessageType type, String sender, String receiver, String content, String command) {
-        this.type = type;
+        this.type = Objects.requireNonNull(type, "Message type cannot be null");
         this.sender = sender;
         this.receiver = receiver;
         this.content = content;
         this.command = command;
-    }
-
-    public Message(MessageType type, String sender, String receiver, String content) {
-        this(type, sender, receiver, content, null);
-    }
-
-    public Message(MessageType type, String sender, String content) {
-        this(type, sender, null, content, null);
     }
 
     public Message() {}
@@ -39,63 +33,64 @@ public class Message {
     public String getCommand() { return command; }
 
     // ======================
-    // Setters
-    // ======================
-    public void setType(MessageType type) { this.type = type; }
-    public void setSender(String sender) { this.sender = sender; }
-    public void setReceiver(String receiver) { this.receiver = receiver; }
-    public void setContent(String content) { this.content = content; }
-    public void setCommand(String command) { this.command = command; }
-
-    // ======================
-    // Serialize → JSON (IMPROVED)
+    // Serialize → JSON
     // ======================
     public String toJson() {
-        return String.format(
-            "{\"type\":\"%s\",\"sender\":\"%s\",\"receiver\":\"%s\",\"content\":\"%s\",\"command\":\"%s\"}",
-            safe(type),
-            safe(sender),
-            safe(receiver),
-            safe(content),
-            safe(command)
-        );
+        StringBuilder sb = new StringBuilder("{");
+
+        append(sb, "type", type != null ? type.name() : null);
+        append(sb, "sender", sender);
+        append(sb, "receiver", receiver);
+        append(sb, "content", content);
+        append(sb, "command", command);
+
+        if (sb.charAt(sb.length() - 1) == ',') {
+            sb.deleteCharAt(sb.length() - 1);
+        }
+
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private void append(StringBuilder sb, String key, String value) {
+        if (value == null) return;
+        sb.append("\"").append(key).append("\":\"")
+          .append(escape(value))
+          .append("\",");
     }
 
     // ======================
-    // Deserialize ← JSON (IMPROVED)
+    // Deserialize ← JSON
     // ======================
     public static Message fromJson(String json) {
-        if (json == null || json.isEmpty()) return null;
-
-        Message msg = new Message();
+        if (json == null || json.isBlank()) return null;
 
         try {
-            String typeStr = extract(json, "type");
-            if (typeStr == null || typeStr.isEmpty()) return null;
+            Message msg = new Message();
 
-            msg.setType(MessageType.valueOf(typeStr));
-            msg.setSender(extract(json, "sender"));
-            msg.setReceiver(extract(json, "receiver"));
-            msg.setContent(extract(json, "content"));
-            msg.setCommand(extract(json, "command"));
+            String typeStr = extract(json, "type");
+            if (typeStr == null) return null;
+
+            msg.type = MessageType.fromString(typeStr); // 🔥 FIXED
+            if (msg.type == null) return null;
+
+            msg.sender = extract(json, "sender");
+            msg.receiver = extract(json, "receiver");
+            msg.content = extract(json, "content");
+            msg.command = extract(json, "command");
+
+            return msg;
 
         } catch (Exception e) {
             return null;
         }
-
-        return msg;
     }
 
-    // ======================
-    // Safe extractor (ESCAPE-AWARE)
-    // ======================
     private static String extract(String json, String key) {
-
         String pattern = "\"" + key + "\":\"";
         int start = json.indexOf(pattern);
 
         if (start == -1) return null;
-
         start += pattern.length();
 
         StringBuilder value = new StringBuilder();
@@ -119,13 +114,8 @@ public class Message {
         return value.toString();
     }
 
-    // ======================
-    // Escape handling
-    // ======================
-    private String safe(Object value) {
-        if (value == null) return "";
-
-        return value.toString()
+    private static String escape(String value) {
+        return value
                 .replace("\\", "\\\\")
                 .replace("\"", "\\\"")
                 .replace("\n", "\\n")
@@ -142,5 +132,16 @@ public class Message {
             case '"': return '"';
             default: return c;
         }
+    }
+
+    @Override
+    public String toString() {
+        return "Message{" +
+                "type=" + type +
+                ", sender='" + sender + '\'' +
+                ", receiver='" + receiver + '\'' +
+                ", content='" + content + '\'' +
+                ", command='" + command + '\'' +
+                '}';
     }
 }

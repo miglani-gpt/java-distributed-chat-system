@@ -6,53 +6,77 @@ import common.MessageType;
 
 import java.io.*;
 import java.net.Socket;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Client {
 
     private static final String SERVER_ADDRESS = "localhost";
     private static final int PORT = 5000;
 
-    private static String username;
-    private static volatile boolean running = true;
+    private String username;
 
-    // Connection
-    private static Socket socket;
-    private static BufferedReader in;
-    private static PrintWriter out;
+    private final AtomicBoolean running = new AtomicBoolean(false);
 
-    // Threads
-    private static Thread listener;
-    private static Thread heartbeat;
-    private static Thread monitor;
+    private Socket socket;
+    private BufferedReader in;
+    private PrintWriter out;
 
-    // Heartbeat
-    private static volatile long lastPongTime = System.currentTimeMillis();
+    private Thread listener;
+    private Thread heartbeat;
+    private Thread monitor;
 
-    // Reconnect config
+    private MessageListener guiListener;
+
+    private volatile long lastPongTime = System.currentTimeMillis();
+
     private static final int MAX_RETRIES = 5;
     private static final int INITIAL_DELAY = 2000;
 
-    private static volatile boolean isCleaningUp = false;
+    private final AtomicBoolean cleaningUp = new AtomicBoolean(false);
 
-    public static void main(String[] args) {
+    public Client(String username) {
+        this.username = username;
+    }
 
-        BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
+    public void setMessageListener(MessageListener listener) {
+        this.guiListener = listener;
+    }
 
-        try {
-            setupUsername(console);
+    public String getUsername() {
+        return username;
+    }
 
-            if (!connect()) {
-                System.out.println("[ERROR] Initial connection failed.");
-                return;
-            }
+    // ==============================
+    // START
+    // ==============================
+    public void start() {
+        if (!connect()) {
+            emit(MessageFactory.system("Disconnected"));
+            emit(MessageFactory.error("Initial connection failed."));
+            return;
+        }
 
-            startThreads();
+        running.set(true);
+        startThreads();
+    }
 
-            mainLoop(console);
+    // ==============================
+    // SEND
+    // ==============================
+    public void send(String input) {
+        if (!running.get() || out == null) return;
 
-        } catch (Exception e) {
-            System.out.println("[ERROR] Unexpected error: " + e.getMessage());
-        } finally {
+        Message msg = buildMessage(input);
+        if (msg == null) return;
+
+        out.println(msg.toJson());
+
+        // ✅ Show own message instantly (clean)
+        if (msg.getType() == MessageType.CHAT) {
+            emit(msg);
+        }
+
+        if ("EXIT".equals(msg.getCommand())) {
             shutdown();
         }
     }
@@ -60,25 +84,24 @@ public class Client {
     // ==============================
     // CONNECTION
     // ==============================
-    private static boolean connect() {
+    private boolean connect() {
         try {
             socket = new Socket(SERVER_ADDRESS, PORT);
 
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            out = new PrintWriter(socket.getOutputStream(), true);
+            out = new PrintWriter(new BufferedWriter(new OutputStreamWriter(socket.getOutputStream())), true);
 
-            System.out.println("[CONNECTED] Connected to server");
+            emit(MessageFactory.system("Connected to server"));
 
-            Message initMsg = MessageFactory.command(username, "INIT", null, "");
+            Message initMsg = MessageFactory.chat(username, "INIT");
             out.println(initMsg.toJson());
 
             lastPongTime = System.currentTimeMillis();
-            running = true;
-
             return true;
 
         } catch (IOException e) {
-            System.out.println("[ERROR] Connection failed.");
+            emit(MessageFactory.system("Disconnected"));
+            emit(MessageFactory.error("Connection failed."));
             return false;
         }
     }
@@ -86,13 +109,13 @@ public class Client {
     // ==============================
     // THREADS
     // ==============================
-    private static void startThreads() {
+    private void startThreads() {
 
         listener = new Thread(() -> {
             try {
                 String response;
 
-                while (running && (response = in.readLine()) != null) {
+                while (running.get() && (response = in.readLine()) != null) {
 
                     Message msg = Message.fromJson(response);
                     if (msg == null) continue;
@@ -106,37 +129,36 @@ public class Client {
                 }
 
             } catch (IOException e) {
-                System.out.println("\n[DISCONNECTED] Server connection lost.");
+                emit(MessageFactory.system("Server connection lost."));
             } finally {
                 handleDisconnect();
             }
-        });
+        }, "listener");
 
         heartbeat = new Thread(() -> {
             try {
-                while (running) {
+                while (running.get()) {
                     Thread.sleep(3000);
 
-                    Message ping = MessageFactory.ping(username);
-                    out.println(ping.toJson());
+                    if (out != null) {
+                        out.println(MessageFactory.ping(username).toJson());
+                    }
                 }
             } catch (InterruptedException ignored) {}
-        });
+        }, "heartbeat");
 
         monitor = new Thread(() -> {
-            while (running) {
+            while (running.get()) {
 
                 if (System.currentTimeMillis() - lastPongTime > 15000) {
-                    System.out.println("\n[DISCONNECTED] Heartbeat timeout.");
+                    emit(MessageFactory.system("Heartbeat timeout."));
                     handleDisconnect();
                     break;
                 }
 
-                try {
-                    Thread.sleep(2000);
-                } catch (InterruptedException ignored) {}
+                sleep(2000);
             }
-        });
+        }, "monitor");
 
         listener.start();
         heartbeat.start();
@@ -144,40 +166,39 @@ public class Client {
     }
 
     // ==============================
-    // DISCONNECT HANDLER
+    // DISCONNECT
     // ==============================
-    private static void handleDisconnect() {
-        if (!running) return;
+    private void handleDisconnect() {
+        if (!running.get()) return;
 
-        System.out.println("[CLIENT] Connection lost. Attempting reconnect...");
-        running = false;
+        emit(MessageFactory.system("Reconnecting..."));
+        running.set(false);
 
-        cleanup();
+        cleanupThreads();
+        cleanupSocket();
 
-        boolean success = reconnect();
-
-        if (!success) {
-            System.out.println("[CLIENT] Could not reconnect. Exiting...");
-            System.exit(0);
+        if (!reconnect()) {
+            emit(MessageFactory.system("Disconnected"));
+            emit(MessageFactory.error("Could not reconnect."));
+            shutdown();
         }
     }
 
-    // ==============================
-    // RECONNECT
-    // ==============================
-    private static boolean reconnect() {
+    private boolean reconnect() {
         int attempts = 0;
         int delay = INITIAL_DELAY;
 
         while (attempts < MAX_RETRIES) {
             try {
-                System.out.println("[RECONNECT] Attempt " + (attempts + 1));
+                emit(MessageFactory.system("Reconnect attempt " + (attempts + 1)));
 
                 Thread.sleep(delay);
 
                 if (connect()) {
+                    running.set(true);
                     startThreads();
-                    System.out.println("[RECONNECT] Success!");
+
+                    emit(MessageFactory.system("Reconnected successfully"));
                     return true;
                 }
 
@@ -193,190 +214,111 @@ public class Client {
     // ==============================
     // CLEANUP
     // ==============================
-    private static synchronized void cleanup() {
-        if (isCleaningUp) return;
-        isCleaningUp = true;
+    private void cleanupSocket() {
+        if (!cleaningUp.compareAndSet(false, true)) return;
 
         try { if (socket != null) socket.close(); } catch (IOException ignored) {}
 
-        isCleaningUp = false;
+        cleaningUp.set(false);
+    }
+
+    private void cleanupThreads() {
+        interrupt(listener);
+        interrupt(heartbeat);
+        interrupt(monitor);
+    }
+
+    private void interrupt(Thread t) {
+        if (t != null && t.isAlive()) {
+            t.interrupt();
+        }
+    }
+
+    public void shutdown() {
+        running.set(false);
+        cleanupThreads();
+        cleanupSocket();
+
+        emit(MessageFactory.system("Client closed"));
     }
 
     // ==============================
-    // MAIN LOOP
+    // BUILD MESSAGE
     // ==============================
-    private static void mainLoop(BufferedReader console) throws IOException, InterruptedException {
+    private Message buildMessage(String input) {
 
-        String userInput;
-
-        while (true) {
-
-            if (!running) {
-                Thread.sleep(100);
-                continue;
+        if (input.startsWith("/msg ")) {
+            String[] parts = input.split(" ", 3);
+            if (parts.length < 3) {
+                emit(MessageFactory.error("Usage: /msg <user> <message>"));
+                return null;
             }
+            return MessageFactory.privateMsg(username, parts[1], parts[2]);
+        }
 
-            if (!console.ready()) {
-                try { Thread.sleep(100); } catch (InterruptedException ignored) {}
-                continue;
+        if (input.equals("/list"))
+            return MessageFactory.command(username, "LIST", null, "");
+
+        if (input.startsWith("/name ")) {
+            String newName = input.substring(6).trim();
+            if (newName.isEmpty()) {
+                emit(MessageFactory.error("Username cannot be empty."));
+                return null;
             }
+            username = newName;
+            return MessageFactory.command(username, "NAME", null, newName);
+        }
 
-            userInput = console.readLine();
-            if (userInput == null) break;
+        if (input.equals("/exit"))
+            return MessageFactory.command(username, "EXIT", null, "");
 
-            userInput = userInput.trim();
-            if (userInput.isEmpty()) continue;
-
-            Message msg = buildMessage(userInput);
-            out.println(msg.toJson());
-
-            if ("EXIT".equals(msg.getCommand())) {
-                running = false;
-                break;
+        if (input.startsWith("/join ")) {
+            String room = input.substring(6).trim();
+            if (room.isEmpty()) {
+                emit(MessageFactory.error("Usage: /join <room>"));
+                return null;
             }
-        }
-    }
-
-    // ==============================
-    // USERNAME SETUP
-    // ==============================
-    private static void setupUsername(BufferedReader console) throws IOException {
-        while (true) {
-            System.out.print("Enter username: ");
-            username = console.readLine();
-
-            if (username != null && !username.trim().isEmpty()) {
-                username = username.trim();
-                return;
-            }
-
-            System.out.println("[ERROR] Username cannot be empty.");
-        }
-    }
-
-    // ==============================
-    // SHUTDOWN
-    // ==============================
-    private static void shutdown() {
-        running = false;
-
-        if (listener != null) listener.interrupt();
-        if (heartbeat != null) heartbeat.interrupt();
-        if (monitor != null) monitor.interrupt();
-
-        cleanup();
-
-        System.out.println("[CLIENT CLOSED]");
-    }
-
-    // ==============================
-    // MESSAGE BUILDING (UNCHANGED)
-    // ==============================
-    
-    private static Message buildMessage(String input) {
-
-    // ==============================
-    // PRIVATE MESSAGE
-    // ==============================
-    if (input.startsWith("/msg ")) {
-        String[] parts = input.split(" ", 3);
-
-        if (parts.length < 3) {
-            System.out.println("[ERROR] Usage: /msg <user> <message>");
-            return MessageFactory.error("Invalid private message format");
+            return MessageFactory.command(username, "JOIN", null, room);
         }
 
-        return MessageFactory.privateMsg(username, parts[1], parts[2]);
+        if (input.equals("/leave"))
+            return MessageFactory.command(username, "LEAVE", null, "");
+
+        if (input.equals("/rooms"))
+            return MessageFactory.command(username, "ROOMS", null, "");
+
+        return MessageFactory.chat(username, input);
     }
 
     // ==============================
-    // LIST USERS
+    // DISPLAY
     // ==============================
-    if (input.equals("/list")) {
-        return MessageFactory.command(username, "LIST", null, "");
+    private void displayMessage(Message msg) {
+
+    // ❌ Ignore own messages from server
+    if (msg.getType() == MessageType.CHAT &&
+        msg.getSender() != null &&
+        msg.getSender().equals(username)) {
+        return;
     }
 
-    // ==============================
-    // CHANGE NAME
-    // ==============================
-    if (input.startsWith("/name ")) {
-        String newName = input.substring(6).trim();
-
-        if (newName.isEmpty()) {
-            System.out.println("[ERROR] Username cannot be empty.");
-            return MessageFactory.error("Invalid username");
-        }
-
-        return MessageFactory.command(username, "NAME", null, newName);
-    }
-
-    // ==============================
-    // EXIT
-    // ==============================
-    if (input.equals("/exit")) {
-        return MessageFactory.command(username, "EXIT", null, "");
-    }
-
-    // ==============================
-    // 🔥 NEW: JOIN ROOM
-    // ==============================
-    if (input.startsWith("/join ")) {
-        String room = input.substring(6).trim();
-
-        if (room.isEmpty()) {
-            System.out.println("[ERROR] Usage: /join <room>");
-            return MessageFactory.error("Invalid room name");
-        }
-
-        return MessageFactory.command(username, "JOIN", null, room);
-    }
-
-    // ==============================
-    // 🔥 NEW: LEAVE ROOM
-    // ==============================
-    if (input.equals("/leave")) {
-        return MessageFactory.command(username, "LEAVE", null, "");
-    }
-
-    // ==============================
-    // 🔥 NEW: LIST ROOMS
-    // ==============================
-    if (input.equals("/rooms")) {
-        return MessageFactory.command(username, "ROOMS", null, "");
-    }
-
-    // ==============================
-    // DEFAULT: CHAT
-    // ==============================
-    return MessageFactory.chat(username, input);
+    emit(msg);
 }
+
     // ==============================
-    // DISPLAY (UNCHANGED)
+    // EMIT
     // ==============================
-    private static void displayMessage(Message msg) {
-
-        if (msg == null || msg.getType() == null) return;
-
-        switch (msg.getType()) {
-
-            case CHAT:
-                System.out.println("[CHAT][" + msg.getSender() + "]: " + msg.getContent());
-                break;
-
-            case PRIVATE:
-                System.out.println("[PRIVATE][" + msg.getSender() + "]: " + msg.getContent());
-                break;
-
-            case SYSTEM:
-                System.out.println("[SYSTEM]: " + msg.getContent());
-                break;
-
-            case ERROR:
-                System.out.println("[ERROR]: " + msg.getContent());
-                break;
-
-            default:
-                System.out.println("[UNKNOWN]: " + msg.getContent());
+    private void emit(Message message) {
+        if (guiListener != null) {
+            guiListener.onMessage(message);
+        } else {
+            System.out.println(message);
         }
+    }
+
+    private void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {}
     }
 }

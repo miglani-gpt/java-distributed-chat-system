@@ -1,106 +1,175 @@
 package server;
 
 import java.io.IOException;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.SocketException;
+import java.net.*;
+import java.time.LocalTime;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Server {
 
     private static final int PORT = 5000;
 
-    // ✅ Shared client registry
+    // ==============================
+    // Shared State
+    // ==============================
     private static final ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>();
-
-    // ✅ Room Manager
     private static final RoomManager roomManager = new RoomManager();
 
-    // 🔥 Bounded thread pool with queue (PRODUCTION SAFE)
-    private static final ExecutorService threadPool =
+    // ==============================
+    // Thread Pool (Improved)
+    // ==============================
+    private static final ThreadPoolExecutor threadPool =
             new ThreadPoolExecutor(
-                    20,                 // core threads
-                    50,                 // max threads
+                    20,
+                    50,
                     60L, TimeUnit.SECONDS,
-                    new LinkedBlockingQueue<>(100), // bounded queue
-                    new ThreadPoolExecutor.AbortPolicy() // reject if overloaded
+                    new LinkedBlockingQueue<>(100),
+                    new NamedThreadFactory(),
+                    new ThreadPoolExecutor.AbortPolicy()
             );
 
     private static volatile boolean running = true;
     private static ServerSocket serverSocket;
 
     public static void main(String[] args) {
+        addShutdownHook();
         startServer();
     }
 
+    // ==============================
+    // Start Server
+    // ==============================
     private static void startServer() {
-        System.out.println("[SERVER] [START] Starting server...");
+        log("START", "Starting server...");
 
         try {
             serverSocket = new ServerSocket(PORT);
-
-            System.out.println("[SERVER] [LISTENING] Port " + PORT);
+            log("LISTENING", "Port " + PORT);
 
             while (running) {
                 try {
                     Socket socket = serverSocket.accept();
+                    configureSocket(socket);
 
-                    // 🔥 Basic socket tuning
-                    socket.setKeepAlive(true);
-                    socket.setTcpNoDelay(true);
-
-                    System.out.println("[SERVER] [NEW CONNECTION] " + socket.getInetAddress());
+                    log("CONNECT", socket.getInetAddress().toString());
 
                     ClientHandler handler = new ClientHandler(socket, clients, roomManager);
 
                     try {
                         threadPool.execute(handler);
+                        logStats(); // 🔥 monitor system
                     } catch (RejectedExecutionException e) {
-                        System.out.println("[SERVER] [OVERLOAD] Too many connections. Rejecting client.");
-                        socket.close();
+                        log("OVERLOAD", "Too many clients. Rejecting connection.");
+                        safeClose(socket);
                     }
 
                 } catch (SocketException e) {
                     if (!running) break;
-                    System.out.println("[SERVER] [ERROR] Socket issue: " + e.getMessage());
+                    log("ERROR", "Socket issue: " + e.getMessage());
                 }
             }
 
         } catch (IOException e) {
-            System.out.println("[SERVER] [ERROR] Failed to start server: " + e.getMessage());
+            log("FATAL", "Failed to start server: " + e.getMessage());
         } finally {
             shutdown();
         }
     }
 
     // ==============================
-    // Graceful Shutdown (IMPROVED)
+    // Socket Configuration
+    // ==============================
+    private static void configureSocket(Socket socket) throws SocketException {
+        socket.setKeepAlive(true);
+        socket.setTcpNoDelay(true);
+        socket.setSoTimeout(0);
+    }
+
+    // ==============================
+    // Shutdown Hook
+    // ==============================
+    private static void addShutdownHook() {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log("HOOK", "Shutdown signal received");
+            shutdown();
+        }));
+    }
+
+    // ==============================
+    // Shutdown Logic
     // ==============================
     private static void shutdown() {
-        System.out.println("[SERVER] [SHUTDOWN] Shutting down server...");
-
+        if (!running) return;
         running = false;
 
-        try {
-            if (serverSocket != null && !serverSocket.isClosed()) {
-                serverSocket.close();
-            }
-        } catch (IOException e) {
-            System.out.println("[SERVER] [ERROR] Closing socket failed: " + e.getMessage());
-        }
+        log("SHUTDOWN", "Shutting down server...");
 
-        // 🔥 Stop accepting new tasks
+        safeClose(serverSocket);
+
         threadPool.shutdown();
 
         try {
-            // wait for active tasks to finish
             if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                log("FORCE", "Forcing shutdown...");
                 threadPool.shutdownNow();
             }
         } catch (InterruptedException e) {
             threadPool.shutdownNow();
+            Thread.currentThread().interrupt();
         }
 
-        System.out.println("[SERVER] [STOPPED]");
+        log("STOPPED", "Server stopped.");
+    }
+
+    // ==============================
+    // Monitoring (🔥 BIG UPGRADE)
+    // ==============================
+    private static void logStats() {
+        log("STATS",
+                "Active=" + threadPool.getActiveCount() +
+                " | Pool=" + threadPool.getPoolSize() +
+                " | Queue=" + threadPool.getQueue().size() +
+                " | Clients=" + clients.size()
+        );
+    }
+
+    // ==============================
+    // Utilities
+    // ==============================
+    private static void safeClose(ServerSocket socket) {
+        try {
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
+            }
+        } catch (IOException ignored) {}
+    }
+
+    private static void safeClose(Socket socket) {
+        try {
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
+            }
+        } catch (IOException ignored) {}
+    }
+
+    private static void log(String tag, String message) {
+        System.out.println(
+                "[" + LocalTime.now() + "] [SERVER] [" + tag + "] " + message
+        );
+    }
+
+    // ==============================
+    // Thread Factory (FIXED)
+    // ==============================
+    private static class NamedThreadFactory implements ThreadFactory {
+        private final AtomicInteger count = new AtomicInteger(0);
+
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread t = new Thread(r);
+            t.setName("client-handler-" + count.incrementAndGet());
+            return t;
+        }
     }
 }
