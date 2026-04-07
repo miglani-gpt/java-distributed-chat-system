@@ -10,15 +10,9 @@ public class Server {
 
     private static final int PORT = 5000;
 
-    // ==============================
-    // Shared State
-    // ==============================
     private static final ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private static final RoomManager roomManager = new RoomManager();
 
-    // ==============================
-    // Thread Pool (Improved)
-    // ==============================
     private static final ThreadPoolExecutor threadPool =
             new ThreadPoolExecutor(
                     20,
@@ -26,7 +20,7 @@ public class Server {
                     60L, TimeUnit.SECONDS,
                     new LinkedBlockingQueue<>(100),
                     new NamedThreadFactory(),
-                    new ThreadPoolExecutor.AbortPolicy()
+                    new ThreadPoolExecutor.CallerRunsPolicy() // 🔥 better than Abort
             );
 
     private static volatile boolean running = true;
@@ -37,9 +31,6 @@ public class Server {
         startServer();
     }
 
-    // ==============================
-    // Start Server
-    // ==============================
     private static void startServer() {
         log("START", "Starting server...");
 
@@ -54,15 +45,19 @@ public class Server {
 
                     log("CONNECT", socket.getInetAddress().toString());
 
-                    ClientHandler handler = new ClientHandler(socket, clients, roomManager);
-
+                    ClientHandler handler;
                     try {
-                        threadPool.execute(handler);
-                        logStats(); // 🔥 monitor system
-                    } catch (RejectedExecutionException e) {
-                        log("OVERLOAD", "Too many clients. Rejecting connection.");
+                        handler = new ClientHandler(socket, clients, roomManager);
+                    } catch (Exception e) {
+                        log("ERROR", "Handler creation failed: " + e.getMessage());
                         safeClose(socket);
+                        continue;
                     }
+
+                    threadPool.execute(handler);
+
+                    // Reduce noise (log every 5 connections maybe later)
+                    logStats();
 
                 } catch (SocketException e) {
                     if (!running) break;
@@ -77,18 +72,12 @@ public class Server {
         }
     }
 
-    // ==============================
-    // Socket Configuration
-    // ==============================
     private static void configureSocket(Socket socket) throws SocketException {
         socket.setKeepAlive(true);
         socket.setTcpNoDelay(true);
         socket.setSoTimeout(0);
     }
 
-    // ==============================
-    // Shutdown Hook
-    // ==============================
     private static void addShutdownHook() {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log("HOOK", "Shutdown signal received");
@@ -96,9 +85,6 @@ public class Server {
         }));
     }
 
-    // ==============================
-    // Shutdown Logic
-    // ==============================
     private static void shutdown() {
         if (!running) return;
         running = false;
@@ -106,6 +92,13 @@ public class Server {
         log("SHUTDOWN", "Shutting down server...");
 
         safeClose(serverSocket);
+
+        // 🔥 CLOSE ALL CLIENTS
+        clients.values().forEach(client -> {
+            try {
+                client.closeConnection(); // you must implement this if not present
+            } catch (Exception ignored) {}
+        });
 
         threadPool.shutdown();
 
@@ -122,9 +115,6 @@ public class Server {
         log("STOPPED", "Server stopped.");
     }
 
-    // ==============================
-    // Monitoring (🔥 BIG UPGRADE)
-    // ==============================
     private static void logStats() {
         log("STATS",
                 "Active=" + threadPool.getActiveCount() +
@@ -134,9 +124,6 @@ public class Server {
         );
     }
 
-    // ==============================
-    // Utilities
-    // ==============================
     private static void safeClose(ServerSocket socket) {
         try {
             if (socket != null && !socket.isClosed()) {
@@ -159,9 +146,6 @@ public class Server {
         );
     }
 
-    // ==============================
-    // Thread Factory (FIXED)
-    // ==============================
     private static class NamedThreadFactory implements ThreadFactory {
         private final AtomicInteger count = new AtomicInteger(0);
 
@@ -169,6 +153,7 @@ public class Server {
         public Thread newThread(Runnable r) {
             Thread t = new Thread(r);
             t.setName("client-handler-" + count.incrementAndGet());
+            t.setDaemon(true); // 🔥 important
             return t;
         }
     }

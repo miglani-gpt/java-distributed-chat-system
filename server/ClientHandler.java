@@ -24,8 +24,8 @@ public class ClientHandler implements Runnable {
     private final AtomicBoolean cleanedUp = new AtomicBoolean(false);
 
     public ClientHandler(Socket socket,
-                         ConcurrentHashMap<String, ClientHandler> clients,
-                         RoomManager roomManager) {
+            ConcurrentHashMap<String, ClientHandler> clients,
+            RoomManager roomManager) {
         this.socket = socket;
         this.clients = clients;
         this.roomManager = roomManager;
@@ -38,7 +38,8 @@ public class ClientHandler implements Runnable {
         try {
             setupStreams();
 
-            if (!registerClient()) return;
+            if (!registerClient())
+                return;
 
             active = true;
             processMessages();
@@ -61,7 +62,8 @@ public class ClientHandler implements Runnable {
     private boolean registerClient() throws IOException {
 
         String raw = in.readLine();
-        if (raw == null) return false;
+        if (raw == null)
+            return false;
 
         Message initMsg = Message.fromJson(raw);
 
@@ -236,16 +238,22 @@ public class ClientHandler implements Runnable {
 
     private synchronized void changeUsername(String newName) {
 
-        if (!valid(newName) || clients.containsKey(newName)) {
-            send(MessageFactory.error("Invalid or taken username."));
+        if (!valid(newName)) {
+            send(MessageFactory.error("Invalid username."));
+            return;
+        }
+
+        newName = newName.trim();
+
+        if (clients.putIfAbsent(newName, this) != null) {
+            send(MessageFactory.error("Username already taken."));
             return;
         }
 
         String oldName = username;
 
         clients.remove(oldName, this);
-        username = newName.trim();
-        clients.put(username, this);
+        username = newName;
 
         broadcast(MessageFactory.system(oldName + " is now known as " + username));
     }
@@ -275,12 +283,14 @@ public class ClientHandler implements Runnable {
     private void broadcastToRoom(String room, Message msg) {
         Set<ClientHandler> members = roomManager.getRoomMembers(room);
 
-        if (members == null) return;
+        if (members == null)
+            return;
 
         for (ClientHandler client : members.toArray(new ClientHandler[0])) {
             try {
                 client.send(msg);
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -291,9 +301,9 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private void send(Message msg) {
+    private synchronized void send(Message msg) {
         try {
-            if (out != null && msg != null) {
+            if (out != null && msg != null && !socket.isClosed()) {
                 out.println(msg.toJson());
                 out.flush();
             }
@@ -316,7 +326,8 @@ public class ClientHandler implements Runnable {
     // ==============================
     private void cleanup() {
 
-        if (!cleanedUp.compareAndSet(false, true)) return;
+        if (!cleanedUp.compareAndSet(false, true))
+            return;
 
         active = false;
 
@@ -333,12 +344,19 @@ public class ClientHandler implements Runnable {
                     }
 
                     roomManager.removeClient(this);
-
-                    if (room != null) {
-                        broadcastToRoom(room,
-                                MessageFactory.system(username + " left the chat."));
-                    }
                 }
+            }
+
+            // 🔥 CLOSE STREAMS PROPERLY
+            try {
+                if (in != null)
+                    in.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (out != null)
+                    out.close();
+            } catch (Exception ignored) {
             }
 
             if (socket != null && !socket.isClosed()) {
@@ -348,6 +366,10 @@ public class ClientHandler implements Runnable {
         } catch (IOException e) {
             log("ERROR", "Cleanup failed: " + e.getMessage());
         }
+    }
+
+    public void closeConnection() {
+        cleanup();
     }
 
     // ==============================

@@ -47,8 +47,6 @@ public class Client {
     }
 
     // ==============================
-    // START
-    // ==============================
     public void start() {
         if (!connect()) {
             emit(MessageFactory.system("Disconnected"));
@@ -61,7 +59,7 @@ public class Client {
     }
 
     // ==============================
-    // SEND
+    // THREAD-SAFE SEND
     // ==============================
     public void send(String input) {
         if (!running.get() || out == null) return;
@@ -69,9 +67,11 @@ public class Client {
         Message msg = buildMessage(input);
         if (msg == null) return;
 
-        out.println(msg.toJson());
+        synchronized (out) {
+            out.println(msg.toJson());
+            out.flush();
+        }
 
-        // ✅ Show own message instantly (clean)
         if (msg.getType() == MessageType.CHAT) {
             emit(msg);
         }
@@ -82,8 +82,6 @@ public class Client {
     }
 
     // ==============================
-    // CONNECTION
-    // ==============================
     private boolean connect() {
         try {
             socket = new Socket(SERVER_ADDRESS, PORT);
@@ -93,23 +91,23 @@ public class Client {
 
             emit(MessageFactory.system("Connected to server"));
 
-            Message initMsg = MessageFactory.chat(username, "INIT");
-            out.println(initMsg.toJson());
+            synchronized (out) {
+                out.println(MessageFactory.chat(username, "INIT").toJson());
+            }
 
             lastPongTime = System.currentTimeMillis();
             return true;
 
         } catch (IOException e) {
-            emit(MessageFactory.system("Disconnected"));
             emit(MessageFactory.error("Connection failed."));
             return false;
         }
     }
 
     // ==============================
-    // THREADS
-    // ==============================
-    private void startThreads() {
+    private synchronized void startThreads() {
+
+        cleanupThreads(); // 🔥 prevent duplicates
 
         listener = new Thread(() -> {
             try {
@@ -141,7 +139,10 @@ public class Client {
                     Thread.sleep(3000);
 
                     if (out != null) {
-                        out.println(MessageFactory.ping(username).toJson());
+                        synchronized (out) {
+                            out.println(MessageFactory.ping(username).toJson());
+                            out.flush();
+                        }
                     }
                 }
             } catch (InterruptedException ignored) {}
@@ -160,13 +161,15 @@ public class Client {
             }
         }, "monitor");
 
+        listener.setDaemon(true);
+        heartbeat.setDaemon(true);
+        monitor.setDaemon(true);
+
         listener.start();
         heartbeat.start();
         monitor.start();
     }
 
-    // ==============================
-    // DISCONNECT
     // ==============================
     private void handleDisconnect() {
         if (!running.get()) return;
@@ -179,7 +182,6 @@ public class Client {
 
         if (!reconnect()) {
             emit(MessageFactory.system("Disconnected"));
-            emit(MessageFactory.error("Could not reconnect."));
             shutdown();
         }
     }
@@ -212,12 +214,12 @@ public class Client {
     }
 
     // ==============================
-    // CLEANUP
-    // ==============================
     private void cleanupSocket() {
         if (!cleaningUp.compareAndSet(false, true)) return;
 
-        try { if (socket != null) socket.close(); } catch (IOException ignored) {}
+        try { if (in != null) in.close(); } catch (Exception ignored) {}
+        try { if (out != null) out.close(); } catch (Exception ignored) {}
+        try { if (socket != null) socket.close(); } catch (Exception ignored) {}
 
         cleaningUp.set(false);
     }
@@ -243,8 +245,6 @@ public class Client {
     }
 
     // ==============================
-    // BUILD MESSAGE
-    // ==============================
     private Message buildMessage(String input) {
 
         if (input.startsWith("/msg ")) {
@@ -265,7 +265,6 @@ public class Client {
                 emit(MessageFactory.error("Username cannot be empty."));
                 return null;
             }
-            username = newName;
             return MessageFactory.command(username, "NAME", null, newName);
         }
 
@@ -290,24 +289,16 @@ public class Client {
         return MessageFactory.chat(username, input);
     }
 
-    // ==============================
-    // DISPLAY
-    // ==============================
     private void displayMessage(Message msg) {
+        if (msg.getType() == MessageType.CHAT &&
+            msg.getSender() != null &&
+            msg.getSender().equals(username)) {
+            return;
+        }
 
-    // ❌ Ignore own messages from server
-    if (msg.getType() == MessageType.CHAT &&
-        msg.getSender() != null &&
-        msg.getSender().equals(username)) {
-        return;
+        emit(msg);
     }
 
-    emit(msg);
-}
-
-    // ==============================
-    // EMIT
-    // ==============================
     private void emit(Message message) {
         if (guiListener != null) {
             guiListener.onMessage(message);
