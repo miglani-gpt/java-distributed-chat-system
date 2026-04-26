@@ -1,0 +1,11 @@
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/BaseTest.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/ProtocolTests.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/TestClient.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/HeartbeatTests.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/PrivateMessageTests.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/RoomTests.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/ServerEdgeCaseTests.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/ChatTests.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/CommandTests.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/RoomAndListTests.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/test/java/integration/AITests.java

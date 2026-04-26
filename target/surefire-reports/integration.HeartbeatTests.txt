@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: integration.HeartbeatTests
+-------------------------------------------------------------------------------
+Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.765 s -- in integration.HeartbeatTests

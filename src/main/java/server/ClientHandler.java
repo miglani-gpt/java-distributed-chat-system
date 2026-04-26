@@ -1,14 +1,15 @@
 package server;
 
-import common.Message;
-import common.MessageFactory;
-import common.MessageValidator;
-
 import java.io.*;
 import java.net.Socket;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import common.Message;
+import common.MessageFactory;
+import common.MessageValidator;
 
 public class ClientHandler implements Runnable {
 
@@ -19,16 +20,20 @@ public class ClientHandler implements Runnable {
 
     private final ConcurrentHashMap<String, ClientHandler> clients;
     private final RoomManager roomManager;
+    private final AIService aiService;
 
     private volatile boolean active = false;
     private final AtomicBoolean cleanedUp = new AtomicBoolean(false);
 
     public ClientHandler(Socket socket,
-            ConcurrentHashMap<String, ClientHandler> clients,
-            RoomManager roomManager) {
+                         ConcurrentHashMap<String, ClientHandler> clients,
+                         RoomManager roomManager,
+                         AIService aiService) {
+
         this.socket = socket;
         this.clients = clients;
         this.roomManager = roomManager;
+        this.aiService = aiService;
     }
 
     @Override
@@ -62,8 +67,7 @@ public class ClientHandler implements Runnable {
     private boolean registerClient() throws IOException {
 
         String raw = in.readLine();
-        if (raw == null)
-            return false;
+        if (raw == null) return false;
 
         Message initMsg = Message.fromJson(raw);
 
@@ -82,7 +86,6 @@ public class ClientHandler implements Runnable {
         ClientHandler old = clients.put(requestedName, this);
 
         if (old != null && old != this) {
-            log("RECONNECT", "Replacing old session for " + requestedName);
             old.forceDisconnect();
         }
 
@@ -91,7 +94,6 @@ public class ClientHandler implements Runnable {
         roomManager.joinRoom("global", this);
 
         send(MessageFactory.system("Welcome " + username + "!"));
-
         broadcastToRoom("global",
                 MessageFactory.system("[ROOM global] " + username + " joined"));
 
@@ -116,28 +118,51 @@ public class ClientHandler implements Runnable {
 
             switch (msg.getType()) {
 
-                case CHAT:
-                    broadcast(MessageFactory.chat(username, msg.getContent()));
-                    break;
+                case CHAT -> handleChat(msg);
+                case PRIVATE -> handlePrivate(msg);
+                case COMMAND -> handleCommand(msg);
+                case PING -> send(MessageFactory.pong());
 
-                case PRIVATE:
-                    handlePrivate(msg);
-                    break;
-
-                case COMMAND:
-                    handleCommand(msg);
-                    break;
-
-                case PING:
-                    send(MessageFactory.pong());
-                    break;
-
-                default:
-                    send(MessageFactory.error("Unsupported message type."));
+                default -> send(MessageFactory.error("Unsupported message type."));
             }
         }
 
         log("DISCONNECTED", username);
+    }
+
+    // ==============================
+    // 🔥 CHAT WITH SAFE AI PIPELINE
+    // ==============================
+    private void handleChat(Message msg) {
+
+        String content = msg.getContent();
+        String room = roomManager.getClientRoom(this);
+
+        if (content == null || content.isEmpty()) return;
+
+        aiService.isToxicAsync(content)
+                .thenAccept(isToxic -> {
+
+                    if (!active) return;
+
+                    if (isToxic) {
+                        sendSafe(MessageFactory.error("⚠️ Message blocked (toxic)"));
+                        return;
+                    }
+
+                    if (room != null) {
+                        roomManager.addMessage(room, username + ": " + content);
+                    }
+
+                    broadcast(MessageFactory.chat(username, content));
+                })
+                .exceptionally(e -> {
+                    log("AI", "Toxicity check failed: " + e.getMessage());
+
+                    // fallback: allow message instead of blocking system
+                    broadcast(MessageFactory.chat(username, content));
+                    return null;
+                });
     }
 
     // ==============================
@@ -153,109 +178,63 @@ public class ClientHandler implements Runnable {
 
         switch (command) {
 
-            case "LIST":
-                sendUserList();
-                break;
+            case "LIST" -> sendUserList();
+            case "NAME" -> changeUsername(msg.getContent());
+            case "EXIT" -> {
+                send(MessageFactory.system("Goodbye!"));
+                cleanup();   // 🔥 immediately close everything
+                return;      // 🔥 exit thread instantly
+            }
+            case "JOIN" -> joinRoom(msg.getContent());
+            case "LEAVE" -> leaveRoom();
+            case "ROOMS" -> listRooms();
+            case "SUMMARIZE" -> summarizeRoom(msg.getContent());
 
-            case "NAME":
-                changeUsername(msg.getContent());
-                break;
-
-            case "EXIT":
-                active = false;
-                break;
-
-            case "JOIN":
-                joinRoom(msg.getContent());
-                break;
-
-            case "LEAVE":
-                leaveRoom();
-                break;
-
-            case "ROOMS":
-                listRooms();
-                break;
-
-            default:
-                send(MessageFactory.error("Unknown command."));
+            default -> send(MessageFactory.error("Unknown command."));
         }
     }
 
     // ==============================
-    // ROOM COMMANDS
+    // 🔥 SAFE SUMMARIZE
     // ==============================
-    private void joinRoom(String roomName) {
+    private void summarizeRoom(String input) {
 
-        if (!valid(roomName)) {
-            send(MessageFactory.error("Room name cannot be empty."));
+        int n = 10;
+
+        try {
+            if (input != null && !input.isEmpty()) {
+                n = Integer.parseInt(input.trim());
+            }
+        } catch (Exception e) {
+            send(MessageFactory.error("Usage: /summarize <N>"));
             return;
         }
 
-        String newRoom = roomName.trim();
-        String oldRoom = roomManager.getClientRoom(this);
+        String room = roomManager.getClientRoom(this);
 
-        if (oldRoom != null && !oldRoom.equals(newRoom)) {
-            broadcastToRoom(oldRoom,
-                    MessageFactory.system("[ROOM " + oldRoom + "] " + username + " left"));
-        }
-
-        roomManager.joinRoom(newRoom, this);
-
-        send(MessageFactory.system("Joined room: " + newRoom));
-
-        broadcastToRoom(newRoom,
-                MessageFactory.system("[ROOM " + newRoom + "] " + username + " joined"));
-    }
-
-    private void leaveRoom() {
-
-        String oldRoom = roomManager.getClientRoom(this);
-
-        if (oldRoom != null) {
-            broadcastToRoom(oldRoom,
-                    MessageFactory.system("[ROOM " + oldRoom + "] " + username + " left"));
-        }
-
-        roomManager.joinRoom("global", this);
-
-        send(MessageFactory.system("Returned to global room"));
-
-        broadcastToRoom("global",
-                MessageFactory.system("[ROOM global] " + username + " joined"));
-    }
-
-    private void listRooms() {
-        send(MessageFactory.system("Rooms: " + roomManager.getAllRooms()));
-    }
-
-    // ==============================
-    // USER MANAGEMENT
-    // ==============================
-    private void sendUserList() {
-        send(MessageFactory.system("Online Users: " + String.join(", ", clients.keySet())));
-    }
-
-    private synchronized void changeUsername(String newName) {
-
-        if (!valid(newName)) {
-            send(MessageFactory.error("Invalid username."));
+        if (room == null) {
+            send(MessageFactory.error("Not in a room"));
             return;
         }
 
-        newName = newName.trim();
+        var messages = roomManager.getRecentMessages(room, n);
 
-        if (clients.putIfAbsent(newName, this) != null) {
-            send(MessageFactory.error("Username already taken."));
+        if (messages.isEmpty()) {
+            send(MessageFactory.system("No messages to summarize"));
             return;
         }
 
-        String oldName = username;
+        send(MessageFactory.system("⏳ Generating summary..."));
 
-        clients.remove(oldName, this);
-        username = newName;
-
-        broadcast(MessageFactory.system(oldName + " is now known as " + username));
+        aiService.summarizeAsync(messages)
+                .thenAccept(summary -> {
+                    if (!active) return;
+                    sendSafe(MessageFactory.system("🧠 Summary:\n" + summary));
+                })
+                .exceptionally(e -> {
+                    sendSafe(MessageFactory.error("Summary failed."));
+                    return null;
+                });
     }
 
     // ==============================
@@ -283,14 +262,10 @@ public class ClientHandler implements Runnable {
     private void broadcastToRoom(String room, Message msg) {
         Set<ClientHandler> members = roomManager.getRoomMembers(room);
 
-        if (members == null)
-            return;
+        if (members == null) return;
 
         for (ClientHandler client : members.toArray(new ClientHandler[0])) {
-            try {
-                client.send(msg);
-            } catch (Exception ignored) {
-            }
+            client.send(msg);
         }
     }
 
@@ -301,6 +276,9 @@ public class ClientHandler implements Runnable {
         }
     }
 
+    // ==============================
+    // SAFE SEND (important)
+    // ==============================
     private synchronized void send(Message msg) {
         try {
             if (out != null && msg != null && !socket.isClosed()) {
@@ -308,26 +286,23 @@ public class ClientHandler implements Runnable {
                 out.flush();
             }
         } catch (Exception e) {
-            log("ERROR", "Send failed: " + e.getMessage());
             cleanup();
         }
     }
 
-    // ==============================
-    // FORCE DISCONNECT
-    // ==============================
+    private void sendSafe(Message msg) {
+        if (active) {
+            send(msg);
+        }
+    }
+
     public void forceDisconnect() {
-        log("FORCE", username);
         cleanup();
     }
 
-    // ==============================
-    // CLEANUP
-    // ==============================
     private void cleanup() {
 
-        if (!cleanedUp.compareAndSet(false, true))
-            return;
+        if (!cleanedUp.compareAndSet(false, true)) return;
 
         active = false;
 
@@ -347,39 +322,67 @@ public class ClientHandler implements Runnable {
                 }
             }
 
-            // 🔥 CLOSE STREAMS PROPERLY
-            try {
-                if (in != null)
-                    in.close();
-            } catch (Exception ignored) {
-            }
-            try {
-                if (out != null)
-                    out.close();
-            } catch (Exception ignored) {
-            }
+            if (in != null) in.close();
+            if (out != null) out.close();
 
             if (socket != null && !socket.isClosed()) {
                 socket.close();
             }
 
-        } catch (IOException e) {
-            log("ERROR", "Cleanup failed: " + e.getMessage());
+        } catch (IOException ignored) {
         }
     }
 
-    public void closeConnection() {
-        cleanup();
+    private void sendUserList() {
+        send(MessageFactory.system("Online Users: " + String.join(", ", clients.keySet())));
     }
 
-    // ==============================
-    // UTIL
-    // ==============================
-    private boolean valid(String s) {
-        return s != null && !s.trim().isEmpty();
+    private synchronized void changeUsername(String newName) {
+
+        if (newName == null || newName.trim().isEmpty()) {
+            send(MessageFactory.error("Invalid username."));
+            return;
+        }
+
+        newName = newName.trim();
+
+        if (clients.putIfAbsent(newName, this) != null) {
+            send(MessageFactory.error("Username already taken."));
+            return;
+        }
+
+        String oldName = username;
+
+        clients.remove(oldName, this);
+        username = newName;
+
+        broadcast(MessageFactory.system(oldName + " is now known as " + username));
+    }
+
+    private void joinRoom(String roomName) {
+        if (roomName == null || roomName.trim().isEmpty()) {
+            send(MessageFactory.error("Room name cannot be empty."));
+            return;
+        }
+
+        roomManager.joinRoom(roomName.trim(), this);
+        send(MessageFactory.system("Joined room: " + roomName));
+    }
+
+    private void leaveRoom() {
+        roomManager.joinRoom("global", this);
+        send(MessageFactory.system("Returned to global room"));
+    }
+
+    private void listRooms() {
+        send(MessageFactory.system("Rooms: " + roomManager.getAllRooms()));
     }
 
     private void log(String tag, String msg) {
         System.out.println("[CLIENT " + (username != null ? username : "?") + "] [" + tag + "] " + msg);
+    }
+
+    public void closeConnection() {
+        cleanup();
     }
 }

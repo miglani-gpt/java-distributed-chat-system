@@ -1,155 +1,111 @@
-# 🚀 Distributed Chat System (JavaFX)
+# 🚀 Distributed Chat System
 
-A **production-style distributed chat system** built in Java using TCP sockets, multithreading, and a structured message protocol, featuring a **modern JavaFX GUI**.
-
-This project demonstrates **real-world backend + frontend system design**, including fault tolerance, concurrency, session recovery, and real-time UI updates.
+A real-time distributed chat system built with **Java**, **TCP sockets**, **multithreading**, and a structured message protocol.  
+The project features a modern **JavaFX client**, room-based messaging, private chat, automatic reconnect, heartbeat monitoring, and an optional **Python AI backend** for toxicity detection and conversation summarization.
 
 ---
 
-## 📌 Highlights
+## ✨ Highlights
 
-* 💬 Real-time multi-client chat system
-* 🎨 Modern JavaFX GUI with chat bubbles
-* 👥 Live user list panel
-* 🏠 Room-based messaging system
-* 🔁 Automatic reconnection with exponential backoff
-* ❤️ Heartbeat-based failure detection (PING/PONG)
-* 🧵 Thread-safe concurrent architecture
-* 🧠 Structured message protocol (no string parsing)
+- 💬 Real-time multi-client chat  
+- 🎨 Modern JavaFX UI with chat bubbles  
+- 👥 Live user list panel  
+- 🏠 Room-based messaging  
+- 🔁 Automatic reconnect with exponential backoff  
+- ❤️ Heartbeat monitoring (PING/PONG)  
+- 🧵 Thread-safe server architecture  
+- 🧠 Structured message protocol (no fragile string parsing)  
+- 🤖 AI-powered toxicity filtering & summarization  
+- 🧪 Automated integration and protocol tests  
 
 ---
 
 ## 🧠 Architecture
 
-```text
-        +-------------------+
-        |      Clients      |
-        | (JavaFX GUI)      |
-        +---------+---------+
-                  |
-                  | TCP
-                  |
-        +---------v---------+
-        |       Server      |
-        |  Thread Pool      |
-        +---------+---------+
-                  |
-        +---------v---------+
-        | Concurrent Client |
-        |   Registry Map    |
-        +-------------------+
 ```
+JavaFX Client
+      ↓ TCP
+Java Server
+      ↓
+ClientHandler + RoomManager + AIService
+      ↓
+Python AI Backend (FastAPI)
+```
+
+---
+
+## 📦 Project Layers
+
+- `common` → Message protocol, types, validation  
+- `server` → Networking, concurrency, rooms, AI integration  
+- `client` → JavaFX UI and client networking  
+- `main.py` → AI backend (FastAPI)  
+- `tests` → Integration and protocol testing  
 
 ---
 
 ## ⚡ Features
 
-### 🧱 Core System
-
-* Multi-client handling using `ExecutorService`
-* Thread-safe client registry (`ConcurrentHashMap`)
-* Clean connection lifecycle management
-
----
-
-### 💬 Messaging
-
-* Public room-based messaging
-* Private messaging (`/msg`)
-* Structured message model:
-
-  * `type`, `sender`, `receiver`, `content`, `command`
-* Centralized message creation (`MessageFactory`)
-
----
+### 💬 Chat System
+- Public room-based messaging  
+- Private messaging using `/msg`  
+- Username management using `/name`  
+- Active users list using `/list`  
 
 ### 🏠 Room System
+- Join or create rooms using `/join`  
+- Leave room using `/leave`  
+- List rooms using `/rooms`  
+- Room-based message isolation  
+- Recent message history support  
 
-* Dynamic room creation (`/join roomName`)
-* Automatic room switching
-* Room isolation (messages visible only within room)
-* `/rooms` command to list rooms
+### 🤖 AI Features
+- Toxicity detection for chat messages  
+- Chat summarization using `/summarize N`  
+- Asynchronous AI calls (non-blocking)  
+- Safe fallback if AI backend is offline  
 
----
+### ❤️ Reliability
+- Heartbeat system using PING/PONG  
+- Auto-reconnect with exponential backoff  
+- Clean connection lifecycle  
+- Thread-safe shared state  
 
-### 🧭 Commands
-
-| Command             | Description           |
-| ------------------- | --------------------- |
-| `/list`             | Show active users     |
-| `/msg user message` | Private message       |
-| `/name newname`     | Change username       |
-| `/join room`        | Join/create a room    |
-| `/leave`            | Return to global room |
-| `/rooms`            | List available rooms  |
-| `/exit`             | Disconnect            |
-
----
-
-### 🎨 GUI Features (JavaFX)
-
-* 💬 Chat bubbles (left/right aligned)
-* 🕒 Message timestamps
-* 👥 Live user list panel
-* 🎯 Message styling (system / private / normal)
-* ⚡ Smooth auto-scroll
-* ✨ Message fade-in animation
-* 🧠 Keyboard support (Enter to send)
-* 🎨 Dark modern UI theme
+### 🎨 UI (JavaFX)
+- Chat bubbles (left/right alignment)  
+- System and error message styling  
+- Auto-scroll to latest messages  
+- Fade-in animations  
+- Live user list panel  
+- Keyboard support (Enter to send)  
 
 ---
 
-### ❤️ Fault Tolerance
+## 🧭 Commands
 
-#### 🔄 Auto-Reconnect
-
-* Automatic reconnection on failure
-* Exponential backoff: `2s → 4s → 8s`
-* Retry limit to prevent infinite loops
-
-#### 💓 Heartbeat System
-
-* Client sends `PING` every 3 seconds
-* Server replies with `PONG`
-* Detects connection loss within 15 seconds
-
-#### 🔁 Session Recovery
-
-* Username reuse after reconnect
-* Old sessions safely replaced
-* Prevents ghost users
-
----
-
-### 🧵 Concurrency Design
-
-* Thread pool for scalable server handling
-* Client uses:
-
-  * Listener thread
-  * Heartbeat thread
-  * Monitor thread
-* Thread-safe shared state
-
----
-
-### 📡 Protocol Design
-
-* Custom structured message protocol
-* Message types:
-
-  * `CHAT`, `PRIVATE`, `SYSTEM`, `COMMAND`, `ERROR`, `PING`, `PONG`
-* Eliminates fragile string parsing
+| Command | Description |
+|--------|------------|
+| `/list` | Show active users |
+| `/msg user message` | Send private message |
+| `/name newname` | Change username |
+| `/join room` | Join/create a room |
+| `/leave` | Return to global room |
+| `/rooms` | List available rooms |
+| `/summarize N` | Summarize last N messages |
+| `/exit` | Disconnect |
 
 ---
 
 ## 🛠️ Tech Stack
 
-* **Language:** Java
-* **UI:** JavaFX
-* **Networking:** TCP (Socket, ServerSocket)
-* **Concurrency:** Thread, ExecutorService
-* **Data Structures:** ConcurrentHashMap
+- Java 17+  
+- JavaFX  
+- TCP Sockets  
+- Multithreading (ExecutorService)  
+- ConcurrentHashMap  
+- Maven  
+- JUnit 5  
+- FastAPI (Python AI backend)  
 
 ---
 
@@ -157,98 +113,142 @@ This project demonstrates **real-world backend + frontend system design**, inclu
 
 ```
 java-distributed-chat-system/
-│
-├── server/
-│   ├── Server.java
-│   └── ClientHandler.java
-│
-├── client/
-│   ├── Client.java
-│   ├── ChatFX.java
-│   ├── ChatView.java
-│   ├── ChatController.java
-│   └── style.css
-│
-├── common/
-│   ├── Message.java
-│   ├── MessageType.java
-│   ├── MessageFactory.java
-│   └── MessageValidator.java
-│
-└── README.md
+├── pom.xml
+├── main.py
+├── src/
+│   ├── main/java/
+│   │   ├── client/
+│   │   ├── server/
+│   │   └── common/
+│   └── test/java/integration/
 ```
 
 ---
 
-## ▶️ Running the Application
+## 🚀 Running the Project
 
-### 1️⃣ Compile
-
-```bash
-javac --module-path /usr/share/openjfx/lib \
-      --add-modules javafx.controls,javafx.fxml \
-      */*.java
+### 1. Build the Project
+```
+mvn clean package
 ```
 
-### 2️⃣ Start Server
-
-```bash
-java server.Server
+### 2. Start AI Backend
+```
+uvicorn main:app --port 8000
 ```
 
-### 3️⃣ Start Client(s)
+Check:
+```
+curl http://localhost:8000/health
+```
 
-```bash
-java --module-path /usr/share/openjfx/lib \
-     --add-modules javafx.controls,javafx.fxml \
-     client.ChatFX
+### 3. Start Server
+```
+java -cp target/classes server.Server
+```
+
+### 4. Start Client
+```
+mvn javafx:run
+```
+
+Run multiple clients for multi-user testing.
+
+---
+
+## 🤖 AI API Endpoints
+
+### Toxicity Check
+```
+curl -X POST http://localhost:8000/toxicity \
+-H "Content-Type: application/json" \
+-d '{"text":"you are stupid"}'
+```
+
+Response:
+```
+{"toxic": true}
+```
+
+---
+
+### Summarization
+```
+curl -X POST http://localhost:8000/summarize \
+-H "Content-Type: application/json" \
+-d '{"messages":["hello","how are you","fine"]}'
+```
+
+Response:
+```
+{"summary":"hello | how are you | fine"}
+```
+
+---
+
+### Health Check
+```
+curl http://localhost:8000/health
 ```
 
 ---
 
 ## 🧪 Testing
 
-### ✅ Functional
+Run all tests:
+```
+mvn test
+```
 
-* Multi-client chat
-* Private messaging
-* Room switching
-
-### 🔥 Fault Tolerance
-
-* Server crash → auto-reconnect
-* Network drop → retry logic
-* Multiple reconnects handled safely
+### Test Coverage
+- Message parsing and validation  
+- Public chat broadcast  
+- Private messaging  
+- Room join and isolation  
+- Command handling  
+- Heartbeat system  
+- Exit handling  
+- AI toxicity filtering  
+- AI summarization  
+- Edge cases and invalid input  
 
 ---
 
 ## ⚠️ Limitations
 
-* No message persistence
-* No authentication
-* No encryption (plain TCP)
+- No database persistence  
+- No authentication system  
+- No encryption (plain TCP)  
+- AI is rule-based (not ML-powered)  
+- UI tests not automated  
 
 ---
 
 ## 🔮 Future Improvements
 
-* 💾 Message persistence (database)
-* 🔐 Authentication system
-* 📁 File sharing
-* 📱 Mobile/web client
-* 🌐 WebSocket support
+- Database persistence (MongoDB / PostgreSQL)  
+- Authentication system  
+- File sharing  
+- WebSocket support  
+- Web/mobile client  
+- Real ML-based AI models  
+- Message history UI  
+- Notifications  
 
 ---
 
 ## 🧠 Key Learnings
 
-* Designing distributed systems
-* Managing concurrency in Java
-* Building real-time UI with JavaFX
-* Handling fault tolerance and recovery
+- Distributed system design  
+- Multithreading and concurrency  
+- Socket programming in Java  
+- Building real-time UI with JavaFX  
+- Designing structured protocols  
+- Integrating Java backend with Python AI  
+- Writing automated integration tests  
 
 ---
 
 ## 👤 Author
 
-**Satvik Miglani**
+Satvik Miglani

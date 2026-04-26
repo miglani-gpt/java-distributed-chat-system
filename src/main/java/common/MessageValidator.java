@@ -13,7 +13,8 @@ public final class MessageValidator {
             "NAME",
             "JOIN",
             "LEAVE",
-            "ROOMS"
+            "ROOMS",
+            "SUMMARIZE"
     );
 
     // ==============================
@@ -78,6 +79,9 @@ public final class MessageValidator {
 
             case "JOIN":
                 return notEmpty(msg.getContent()); // room name
+
+            case "SUMMARIZE":
+                return notEmpty(msg.getContent()); // expects number
 
             default:
                 return false;

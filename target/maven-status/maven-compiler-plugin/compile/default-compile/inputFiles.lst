@@ -1,0 +1,13 @@
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/common/Message.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/server/ClientHandler.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/client/MessageListener.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/common/MessageValidator.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/client/Client.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/server/AIService.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/server/Server.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/common/MessageType.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/server/RoomManager.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/client/ChatFX.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/common/MessageFactory.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/client/ChatView.java
+/home/desperado/coding/Projects/java-distributed-chat-system/src/main/java/client/ChatController.java

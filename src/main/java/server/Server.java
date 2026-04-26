@@ -13,6 +13,9 @@ public class Server {
     private static final ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private static final RoomManager roomManager = new RoomManager();
 
+    // 🔥 AI SERVICE (NEW)
+    private static final AIService aiService = new AIService();
+
     private static final ThreadPoolExecutor threadPool =
             new ThreadPoolExecutor(
                     20,
@@ -20,7 +23,7 @@ public class Server {
                     60L, TimeUnit.SECONDS,
                     new LinkedBlockingQueue<>(100),
                     new NamedThreadFactory(),
-                    new ThreadPoolExecutor.CallerRunsPolicy() // 🔥 better than Abort
+                    new ThreadPoolExecutor.CallerRunsPolicy()
             );
 
     private static volatile boolean running = true;
@@ -47,7 +50,8 @@ public class Server {
 
                     ClientHandler handler;
                     try {
-                        handler = new ClientHandler(socket, clients, roomManager);
+                        // 🔥 INJECT AI SERVICE HERE
+                        handler = new ClientHandler(socket, clients, roomManager, aiService);
                     } catch (Exception e) {
                         log("ERROR", "Handler creation failed: " + e.getMessage());
                         safeClose(socket);
@@ -55,8 +59,6 @@ public class Server {
                     }
 
                     threadPool.execute(handler);
-
-                    // Reduce noise (log every 5 connections maybe later)
                     logStats();
 
                 } catch (SocketException e) {
@@ -96,7 +98,7 @@ public class Server {
         // 🔥 CLOSE ALL CLIENTS
         clients.values().forEach(client -> {
             try {
-                client.closeConnection(); // you must implement this if not present
+                client.closeConnection();
             } catch (Exception ignored) {}
         });
 
@@ -153,7 +155,7 @@ public class Server {
         public Thread newThread(Runnable r) {
             Thread t = new Thread(r);
             t.setName("client-handler-" + count.incrementAndGet());
-            t.setDaemon(true); // 🔥 important
+            t.setDaemon(true);
             return t;
         }
     }

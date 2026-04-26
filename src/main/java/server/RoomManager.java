@@ -9,6 +9,10 @@ public class RoomManager {
     private final ConcurrentHashMap<String, Set<ClientHandler>> rooms = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ClientHandler, String> clientRooms = new ConcurrentHashMap<>();
 
+    // 🔥 NEW: MESSAGE HISTORY
+    private final ConcurrentHashMap<String, java.util.List<String>> roomHistory = new ConcurrentHashMap<>();
+    private static final int MAX_HISTORY = 50;
+
     private static final String DEFAULT_ROOM = "global";
 
     public RoomManager() {
@@ -20,7 +24,8 @@ public class RoomManager {
     // ==============================
     public void joinRoom(String room, ClientHandler client) {
 
-        if (client == null) return; // 🔥 defensive
+        if (client == null)
+            return;
 
         String newRoom = normalize(room);
 
@@ -28,14 +33,15 @@ public class RoomManager {
 
             String oldRoom = clientRooms.get(client);
 
-            if (newRoom.equals(oldRoom)) return;
+            if (newRoom.equals(oldRoom))
+                return;
 
             if (oldRoom != null) {
                 removeFromRoom(oldRoom, client);
             }
 
             rooms.computeIfAbsent(newRoom, r -> ConcurrentHashMap.newKeySet())
-                 .add(client);
+                    .add(client);
 
             clientRooms.put(client, newRoom);
         }
@@ -46,7 +52,8 @@ public class RoomManager {
     // ==============================
     public void leaveCurrentRoom(ClientHandler client) {
 
-        if (client == null) return;
+        if (client == null)
+            return;
 
         synchronized (client) {
 
@@ -59,7 +66,7 @@ public class RoomManager {
     }
 
     // ==============================
-    // INTERNAL REMOVE (FIXED RACE)
+    // INTERNAL REMOVE
     // ==============================
     private void removeFromRoom(String room, ClientHandler client) {
 
@@ -68,7 +75,6 @@ public class RoomManager {
         if (members != null) {
             members.remove(client);
 
-            // 🔥 safer removal
             if (members.isEmpty() && !room.equals(DEFAULT_ROOM)) {
                 rooms.computeIfPresent(room, (r, set) -> set.isEmpty() ? null : set);
             }
@@ -83,9 +89,9 @@ public class RoomManager {
         String normalized = normalize(room);
         Set<ClientHandler> members = rooms.get(normalized);
 
-        if (members == null) return Collections.emptySet();
+        if (members == null)
+            return Collections.emptySet();
 
-        // 🔥 return snapshot (important)
         return Set.copyOf(members);
     }
 
@@ -96,7 +102,7 @@ public class RoomManager {
 
     // ==============================
     public Set<String> getAllRooms() {
-        return Set.copyOf(rooms.keySet()); // 🔥 snapshot
+        return Set.copyOf(rooms.keySet());
     }
 
     // ==============================
@@ -105,8 +111,47 @@ public class RoomManager {
     }
 
     // ==============================
+    // 🔥 NEW: ADD MESSAGE TO HISTORY
+    // ==============================
+    public void addMessage(String room, String msg) {
+
+        room = normalize(room);
+
+        roomHistory.putIfAbsent(room,
+                Collections.synchronizedList(new java.util.ArrayList<>()));
+
+        var list = roomHistory.get(room);
+
+        synchronized (list) {
+            list.add(msg);
+
+            if (list.size() > MAX_HISTORY) {
+                list.remove(0);
+            }
+        }
+    }
+
+    // ==============================
+    // 🔥 NEW: GET RECENT MESSAGES
+    // ==============================
+    public java.util.List<String> getRecentMessages(String room, int n) {
+
+        room = normalize(room);
+
+        var list = roomHistory.getOrDefault(room, new java.util.ArrayList<>());
+
+        synchronized (list) {
+            int size = list.size();
+            int start = Math.max(0, size - n);
+
+            return new java.util.ArrayList<>(list.subList(start, size));
+        }
+    }
+
+    // ==============================
     private String normalize(String room) {
-        if (room == null) return DEFAULT_ROOM;
+        if (room == null)
+            return DEFAULT_ROOM;
         String trimmed = room.trim().toLowerCase();
         return trimmed.isEmpty() ? DEFAULT_ROOM : trimmed;
     }

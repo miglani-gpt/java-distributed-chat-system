@@ -1,12 +1,12 @@
 package client;
 
-import common.Message;
-import common.MessageFactory;
-import common.MessageType;
-
 import java.io.*;
 import java.net.Socket;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import common.Message;
+import common.MessageFactory;
+import common.MessageType;
 
 public class Client {
 
@@ -59,10 +59,11 @@ public class Client {
     }
 
     // ==============================
-    // THREAD-SAFE SEND
-    // ==============================
     public void send(String input) {
-        if (!running.get() || out == null) return;
+        if (!running.get() || out == null) {
+            emit(MessageFactory.error("Not connected to server."));
+            return;
+        }
 
         Message msg = buildMessage(input);
         if (msg == null) return;
@@ -91,8 +92,10 @@ public class Client {
 
             emit(MessageFactory.system("Connected to server"));
 
+            // 🔥 FIXED INIT HANDSHAKE
             synchronized (out) {
-                out.println(MessageFactory.chat(username, "INIT").toJson());
+                out.println(new Message(MessageType.CHAT, username, null, "INIT", null).toJson());
+                out.flush();
             }
 
             lastPongTime = System.currentTimeMillis();
@@ -107,7 +110,7 @@ public class Client {
     // ==============================
     private synchronized void startThreads() {
 
-        cleanupThreads(); // 🔥 prevent duplicates
+        cleanupThreads();
 
         listener = new Thread(() -> {
             try {
@@ -161,9 +164,10 @@ public class Client {
             }
         }, "monitor");
 
-        listener.setDaemon(true);
-        heartbeat.setDaemon(true);
-        monitor.setDaemon(true);
+        // 🔥 FIX: NON-DAEMON THREADS
+        listener.setDaemon(false);
+        heartbeat.setDaemon(false);
+        monitor.setDaemon(false);
 
         listener.start();
         heartbeat.start();
@@ -213,7 +217,6 @@ public class Client {
         return false;
     }
 
-    // ==============================
     private void cleanupSocket() {
         if (!cleaningUp.compareAndSet(false, true)) return;
 
@@ -246,6 +249,8 @@ public class Client {
 
     // ==============================
     private Message buildMessage(String input) {
+
+        if (input == null || input.trim().isEmpty()) return null;
 
         if (input.startsWith("/msg ")) {
             String[] parts = input.split(" ", 3);
@@ -285,6 +290,12 @@ public class Client {
 
         if (input.equals("/rooms"))
             return MessageFactory.command(username, "ROOMS", null, "");
+
+        if (input.startsWith("/summarize")) {
+            String[] parts = input.split(" ", 2);
+            String value = parts.length > 1 ? parts[1] : "";
+            return MessageFactory.command(username, "SUMMARIZE", null, value);
+        }
 
         return MessageFactory.chat(username, input);
     }

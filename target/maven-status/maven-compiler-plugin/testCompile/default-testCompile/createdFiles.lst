@@ -1,0 +1,11 @@
+integration/RoomTests.class
+integration/ProtocolTests.class
+integration/ChatTests.class
+integration/CommandTests.class
+integration/RoomAndListTests.class
+integration/AITests.class
+integration/ServerEdgeCaseTests.class
+integration/PrivateMessageTests.class
+integration/HeartbeatTests.class
+integration/TestClient.class
+integration/BaseTest.class
