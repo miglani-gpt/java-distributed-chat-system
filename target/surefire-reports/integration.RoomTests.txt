@@ -1,4 +1,4 @@
 -------------------------------------------------------------------------------
 Test set: integration.RoomTests
 -------------------------------------------------------------------------------
-Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 8.783 s -- in integration.RoomTests
+Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 8.867 s -- in integration.RoomTests

@@ -1,4 +1,4 @@
 -------------------------------------------------------------------------------
 Test set: integration.AITests
 -------------------------------------------------------------------------------
-Tests run: 2, Failures: 0, Errors: 0, Skipped: 2, Time elapsed: 0 s -- in integration.AITests
+Tests run: 2, Failures: 0, Errors: 0, Skipped: 2, Time elapsed: 1.450 s -- in integration.AITests
